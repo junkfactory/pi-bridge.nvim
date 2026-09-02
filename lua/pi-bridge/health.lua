@@ -1,7 +1,10 @@
 local M = {}
 
 local SOCKET_DIR = vim.fn.expand("~/.pi/agent/pi-bridge/sockets/")
-local EXTENSION_PATH = vim.fn.expand("~/.pi/agent/extensions/pi-bridge.ts")
+local EXTENSION_PATHS = {
+	vim.fn.expand("~/.pi/agent/git/github.com/junkfactory/pi-bridge.ext/src/index.ts"),
+	vim.fn.expand("~/.pi/agent/extensions/pi-bridge.ts"),
+}
 
 local function check_pi_binary()
 	local pi_path = vim.fn.exepath("pi")
@@ -32,15 +35,17 @@ local function check_socket_dir()
 end
 
 local function check_extension()
-	local stat = vim.uv.fs_stat(EXTENSION_PATH)
-	if stat then
-		vim.health.ok("pi-bridge extension found: " .. EXTENSION_PATH)
-	else
-		vim.health.warn("pi-bridge extension not found: " .. EXTENSION_PATH, {
-			"Install pi-bridge.ext for full functionality",
-			"See: https://github.com/junkfactory/pi-bridge",
-		})
+	for _, path in ipairs(EXTENSION_PATHS) do
+		local stat = vim.uv.fs_stat(path)
+		if stat then
+			vim.health.ok("pi-bridge extension found: " .. path)
+			return
+		end
 	end
+	vim.health.warn("pi-bridge extension not found", {
+		"Install pi-bridge.ext for full functionality",
+		"See: https://github.com/junkfactory/pi-bridge.ext",
+	})
 end
 
 local function check_autochdir()

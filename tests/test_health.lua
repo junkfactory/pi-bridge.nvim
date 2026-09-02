@@ -129,10 +129,10 @@ T["health"]["check detects missing extension"] = function()
 			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
 			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
 		}
-		-- Stub fs_stat to make extension path not exist
+		-- Stub fs_stat to make all extension paths not exist
 		_G._orig_fs_stat = vim.uv.fs_stat
 		vim.uv.fs_stat = function(path)
-			if path:find('pi%-bridge%.ts') then return nil end
+			if path:find('pi%-bridge') and (path:find('%.ts$') or path:find('index%.ts$')) then return nil end
 			return _G._orig_fs_stat(path)
 		end
 		require('pi-bridge.health').check()
@@ -147,6 +147,40 @@ T["health"]["check detects missing extension"] = function()
 		end
 	end
 	expect.equality(has_ext_warn, true)
+end
+
+T["health"]["check detects git-installed extension"] = function()
+	child.lua("require('pi-bridge').setup({ log_level = 'error' })")
+	child.lua([[
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		-- Stub fs_stat to make git package path exist but legacy path not
+		_G._orig_fs_stat = vim.uv.fs_stat
+		vim.uv.fs_stat = function(path)
+			if path:find('git/github.com/junkfactory/pi%-bridge%.ext') then
+				return { type = 'file' }
+			end
+			if path:find('extensions/pi%-bridge%.ts$') then return nil end
+			return _G._orig_fs_stat(path)
+		end
+		require('pi-bridge.health').check()
+		vim.uv.fs_stat = _G._orig_fs_stat
+	]])
+	local output = child.lua("return _G.health_output")
+	local has_ext_ok = false
+	for _, entry in ipairs(output) do
+		if entry.kind == "ok" and entry.msg and entry.msg:find("pi%-bridge extension found") then
+			has_ext_ok = true
+			break
+		end
+	end
+	expect.equality(has_ext_ok, true)
 end
 
 return T
