@@ -28,12 +28,40 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 }
 ```
 
+### From a local clone (development)
+
+Clone the repo and point your plugin manager at it. Edits under `lua/` are picked up on the next `:source` or nvim restart.
+
+**lazy.nvim** — use `dir` so lazy loads the local checkout instead of fetching from GitHub:
+
+```lua
+{
+  dir = "/absolute/path/to/pi-bridge.nvim",
+  name = "pi-bridge.nvim",  -- preserve the plugin name for lazy's bookkeeping
+  config = function()
+    require("pi-bridge").setup()
+  end,
+}
+```
+
+Run `:Lazy install` once to register; subsequent edits in the clone take effect after restarting nvim or running `:Lazy reload pi-bridge.nvim`.
+
+**Native packages** (no plugin manager) — symlink the clone into `pack/local/start` so Neovim auto-loads it on startup:
+
+```bash
+mkdir -p ~/.local/share/nvim/site/pack/local/start
+ln -s /absolute/path/to/pi-bridge.nvim \
+      ~/.local/share/nvim/site/pack/local/start/pi-bridge.nvim
+```
+
+Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re-scans the runtimepath. The symlink stays in sync with your working tree automatically.
+
 ## Usage
 
-| Mode | Mapping | Action |
-| --- | --- | --- |
+| Mode   | Mapping      | Action                                  |
+|--------|--------------|-----------------------------------------|
 | Normal | `<leader>ai` | Send prompt + current buffer as context |
-| Visual | `<leader>ai` | Send prompt + selection as context |
+| Visual | `<leader>ai` | Send prompt + selection as context      |
 
 Or use the command:
 
@@ -106,12 +134,12 @@ When the socket doesn't exist or connection fails:
 3. Wait for socket to appear (polls every 200ms up to `launch_timeout`)
 4. Connect and send message
 
-| Scenario | Behavior |
-| --- | --- |
-| Socket exists but connection refused | Relaunch |
-| User closes pi split manually | Next prompt detects missing socket, relaunches |
-| Pi exits unexpectedly | Socket disappears, next prompt triggers relaunch |
-| `auto_launch = false` | Error: "pi-bridge socket not found. Launch pi manually." |
+| Scenario                             | Behavior                                                 |
+|--------------------------------------|----------------------------------------------------------|
+| Socket exists but connection refused | Relaunch                                                 |
+| User closes pi split manually        | Next prompt detects missing socket, relaunches           |
+| Pi exits unexpectedly                | Socket disappears, next prompt triggers relaunch         |
+| `auto_launch = false`                | Error: "pi-bridge socket not found. Launch pi manually." |
 
 ### Startup Checks
 
