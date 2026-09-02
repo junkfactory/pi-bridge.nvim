@@ -1,3 +1,16 @@
+-- Message routing table for inbound events.
+--
+-- Design decision: why dispatch.lua instead of an event bus
+--
+--   This is a plain table lookup — `handlers[msg.type](msg)`. It is not an
+--   event emitter: no wildcard matching, no bubbling, no middleware, no `off()`.
+--   Handlers are registered once in `setup()` and never change at runtime.
+--
+--   The indirection exists so that `socket.lua` stays message-agnostic (it
+--   doesn't know what `agent_start` means) and `init.lua` doesn't become a
+--   switch statement. Adding a new message type is one `register()` call with
+--   no existing code changes.
+
 local log = require("pi-bridge.log")
 
 local M = {}

@@ -188,7 +188,13 @@ function M.prompt(opts)
 	local function send(text)
 		if not text or text == "" then return end
 
-		local ctx = context.get(mode)
+		local ok_ctx, ctx = pcall(context.get, mode)
+		if not ok_ctx then
+			log.error("failed to gather context: " .. tostring(ctx))
+			vim.notify("pi-bridge: failed to gather context", vim.log.levels.ERROR)
+			return
+		end
+
 		log.info("prompt: " .. text .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")
 
 		ensure_connection(function(ok)
@@ -197,11 +203,15 @@ function M.prompt(opts)
 				return
 			end
 
-			socket.send({
+			local ok_send, send_err = pcall(socket.send, {
 				type = "prompt",
 				text = text,
 				context = ctx,
 			})
+			if not ok_send then
+				log.error("failed to send message: " .. tostring(send_err))
+				vim.notify("pi-bridge: failed to send message", vim.log.levels.ERROR)
+			end
 		end)
 	end
 

@@ -10,8 +10,10 @@ CONTENTS                                                  *pi-bridge-contents*
 2. Setup                                                       |pi-bridge-setup|
 3. Commands                                                 |pi-bridge-commands|
 4. Config                                                     |pi-bridge-config|
-5. Architecture                                           |pi-bridge-architecture|
-6. Troubleshooting                                     |pi-bridge-troubleshooting|
+5. Events                                                   |pi-bridge-events|
+6. Healthcheck                                           |pi-bridge-healthcheck|
+7. Architecture                                           |pi-bridge-architecture|
+8. Troubleshooting                                     |pi-bridge-troubleshooting|
 
 ==============================================================================
 1. Overview                                                 *pi-bridge-overview*
@@ -117,7 +119,59 @@ log_level ~
   "trace", "debug", "info", "warn", or "error". Default "info".
 
 ==============================================================================
-5. Architecture                                       *pi-bridge-architecture*
+5. Events                                                   *pi-bridge-events*
+
+pi-bridge.nvim receives events from pi via the socket and acts on them.
+Events are dispatched through a routing table — each message type maps
+to a handler function.
+
+Built-in event types: ~
+
+  agent_start ~
+    Fired when pi begins processing. Shows a notification with the
+    message content (or "working..." if none provided).
+
+  agent_end ~
+    Fired when pi finishes processing. Shows a notification with the
+    message content (or "done" if none provided).
+
+  file_edited ~
+    Fired when pi edits a file. Highlights the edited buffer using
+    extmarks. The message must include a `file` field with the absolute
+    path.
+
+Custom handlers: ~
+
+  To handle custom event types, register a handler after setup: >lua
+    local dispatch = require("pi-bridge.dispatch")
+    dispatch.register("my_event", function(msg)
+      -- msg is the decoded JSON table
+      print("Received: " .. vim.inspect(msg))
+    end)
+<
+  Adding a built-in event type requires one line in init.lua's setup(): >lua
+    dispatch.register("new_type", ui.on_new_type)
+<
+==============================================================================
+6. Healthcheck                                           *pi-bridge-healthcheck*
+
+                                                           *:checkhealth*
+:checkhealth pi-bridge    Run read-only diagnostics.
+
+Checks performed: ~
+
+  1. `pi` binary found in $PATH
+  2. Socket directory (~/.pi/agent/pi-bridge/sockets/) exists
+  3. pi-bridge extension installed (~/.pi/agent/extensions/pi-bridge.ts)
+  4. autochdir status (warns if enabled)
+  5. Current socket connection status
+
+The healthcheck never launches pi, never connects to sockets, and never
+modifies state (except creating the socket directory if missing, which is
+harmless).
+
+==============================================================================
+7. Architecture                                       *pi-bridge-architecture*
 
 >text
     ┌─────────────┐     Unix Socket     ┌─────────────────┐
@@ -131,7 +185,7 @@ Socket path: ~/.pi/agent/pi-bridge/sockets/<sha256(cwd)>.sock
 One socket per project directory. SHA256 of the absolute cwd path.
 
 ==============================================================================
-6. Troubleshooting                                 *pi-bridge-troubleshooting*
+8. Troubleshooting                                 *pi-bridge-troubleshooting*
 
                                                   *pi-bridge-autochdir*
 autochdir ~

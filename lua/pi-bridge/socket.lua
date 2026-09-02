@@ -1,3 +1,17 @@
+-- Socket transport over Unix domain sockets.
+--
+-- Design decisions:
+--
+--   Why `vim.uv` directly, not `vim.fn.sockconnect`:
+--   `vim.fn.sockconnect("unix", path, { rpc = true })` expects Neovim's
+--   msgpack-RPC protocol. We need raw NDJSON over a Unix socket.
+--   `vim.uv.new_pipe()` gives us a raw stream — no protocol mismatch.
+--
+--   Why connection-per-session, not connect-per-prompt:
+--   Connecting on every prompt adds latency and races with pi's socket
+--   lifecycle. A persistent connection detects pi exits (EOF) and reconnects
+--   cleanly. The connection is a single libuv pipe — negligible resource cost.
+
 local log = require("pi-bridge.log")
 
 local M = {}

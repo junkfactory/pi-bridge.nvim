@@ -1,3 +1,19 @@
+-- Process manager for auto-launching pi in a terminal split.
+--
+-- Design decisions:
+--
+--   Why poll with `uv.new_timer`, not `vim.wait`:
+--   `vim.wait` blocks the event loop. `uv.new_timer` is non-blocking —
+--   Neovim stays responsive during socket polling. The timer fires every
+--   200ms, checks `fs_stat`, and resolves/rejects via callback.
+--
+--   Why separate from socket.lua:
+--   `launch.lua` depends on Neovim's terminal API (`vim.cmd.terminal`,
+--   window management). `socket.lua` depends on `vim.uv` (libuv). Mixing
+--   them couples transport to UI. Keeping them separate means `socket.lua`
+--   can be tested without Neovim's terminal, and `launch.lua` can be
+--   swapped (e.g., tmux launch) without touching transport.
+
 local log = require("pi-bridge.log")
 
 local M = {}

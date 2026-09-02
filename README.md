@@ -15,7 +15,7 @@ Send prompts with buffer/selection context to pi directly from Neovim. Responses
 
 ## Install
 
-Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed in pi.
+Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed in pi (see [pi-bridge.ext install](https://github.com/junkfactory/pi-bridge.ext#install)).
 
 ### lazy.nvim
 
@@ -27,6 +27,16 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
   end,
 }
 ```
+
+### Native packages
+
+```bash
+mkdir -p ~/.local/share/nvim/site/pack/plugins/start
+git clone https://github.com/junkfactory/pi-bridge.nvim.git \
+  ~/.local/share/nvim/site/pack/plugins/start/pi-bridge.nvim
+```
+
+Restart nvim after cloning. The plugin loads automatically.
 
 ### From a local clone (development)
 
