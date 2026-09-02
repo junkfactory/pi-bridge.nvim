@@ -161,8 +161,9 @@ local function check_socket_status()
 	end
 
 	-- No file at all in this cwd. Don't walk upward; that's the
-	-- runtime resolver's job. Health reports the local cwd state.
-	vim.health.info("Socket: not connected (no socket file in cwd)")
+	-- runtime resolver's job. Show the expected socket path so the
+	-- user knows where pi would create it.
+	vim.health.info("Socket: not connected (expected: " .. cwd_path .. ")")
 end
 
 local function check_log_file()
