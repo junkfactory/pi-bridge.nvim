@@ -34,6 +34,8 @@ T["placeholders"]["resolve replaces @selection with selected text"] = function()
 		vim.api.nvim_win_set_cursor(0, { 2, 0 })
 		vim.cmd('normal! V')
 		vim.api.nvim_win_set_cursor(0, { 3, 999 })
+		-- Exit visual mode to set '< and '> marks (simulates keymap behavior)
+		vim.cmd('normal! \27')
 	]])
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("explain @selection")

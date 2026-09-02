@@ -16,13 +16,22 @@ local function resolve_this()
 end
 
 local function resolve_selection()
+	-- Check current mode first (works when called directly in visual mode).
+	-- If not in visual mode, check if we just exited visual mode via a keymap.
+	-- vim.fn.visualmode() returns the last visual mode character ('v', 'V', or '\22')
+	-- and persists after exiting visual mode, unlike vim.fn.mode() which returns 'n'.
 	local mode = vim.fn.mode()
 	if not VISUAL_MODES[mode] then
-		return ""
+		local last_visual = vim.fn.visualmode()
+		if not VISUAL_MODES[last_visual] then
+			return ""
+		end
 	end
 
-	local start_pos = vim.fn.getpos("v")
-	local end_pos = vim.fn.getpos(".")
+	-- Use persistent marks '< and '> which survive exiting visual mode.
+	-- The 'v' and '.' marks are only valid during active visual mode.
+	local start_pos = vim.fn.getpos("'<")
+	local end_pos = vim.fn.getpos("'>")
 
 	local start_line = start_pos[2]
 	local start_col = start_pos[3]
