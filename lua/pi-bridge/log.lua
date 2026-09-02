@@ -10,7 +10,7 @@ local LEVELS = {
 
 local LEVEL_NAMES = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
 
-local fd = nil
+local log_path = nil
 local level_threshold = LEVELS.info
 
 local function timestamp()
@@ -18,11 +18,11 @@ local function timestamp()
 end
 
 local function write_line(line)
-	if not fd then return end
-	local ok, err = pcall(vim.uv.fs_write, fd, line .. "\n", -1)
-	if not ok then
-		-- swallow I/O errors — logging must never crash
-	end
+	if not log_path then return end
+	local f = io.open(log_path, "a")
+	if not f then return end
+	f:write(line .. "\n")
+	f:close()
 end
 
 function M.init(path, level)
@@ -31,13 +31,8 @@ function M.init(path, level)
 	local dir = vim.fn.fnamemodify(path, ":h")
 	vim.fn.mkdir(dir, "p")
 
-	local err, handle = vim.uv.fs_open(path, "a", 438) -- 0666
-	if handle then
-		fd = handle
-		M.info("log opened: " .. path)
-	else
-		-- can't open log file — silently continue
-	end
+	log_path = path
+	M.info("log opened: " .. path)
 end
 
 function M.log(level, msg)

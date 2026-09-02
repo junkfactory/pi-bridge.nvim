@@ -16,8 +16,17 @@ pi-bridge.nvim/
 │       ├── ui.lua              -- vim.notify, highlights, statusline
 │       ├── log.lua             -- file logger (append-only, level-filtered)
 │       └── health.lua          -- :checkhealth pi-bridge
+├── tests/
+│   ├── helpers.lua             -- mock socket server, tmpdir, wait_until
+│   ├── test_log.lua            -- log level filtering, formatting, unwritable path
+│   ├── test_context.lua        -- normal/visual mode, selection, empty buffer
+│   ├── test_socket.lua         -- connect, send, receive, partial frames, reconnect
+│   └── test_init.lua           -- setup validation, commands, keymaps, prompt flow
+├── scripts/
+│   └── minimal_init.lua        -- test harness rtp setup
 ├── doc/
 │   └── pi-bridge.nvim.txt     -- :help pi-bridge.nvim
+├── Makefile                    -- `make test` runs full suite
 ├── README.md                   -- (exists)
 └── IMPLEMENTATION.md           -- (this file)
 ```
@@ -143,9 +152,11 @@ pi-bridge.nvim/
 
 ---
 
-### Phase 2: Socket + Context + Prompt Flow
+### Phase 2: Socket + Context + Prompt Flow ✅
 
 **Goal:** End-to-end message flow: Neovim → socket → pi extension.
+
+**Status:** Complete. Socket, context, and prompt flow implemented. VimLeavePre cleanup added.
 
 | File                        | What to build                                                                                               |
 |-----------------------------|-------------------------------------------------------------------------------------------------------------|
@@ -188,6 +199,8 @@ prompt(opts?)
 ```
 
 **Exit criteria:** `<leader>ai` → type message → appears in pi TUI as a user message with file context. Works with pi already running.
+
+**Tests:** 35/35 passing (`make test`). Covers log levels, context extraction, socket connect/send/receive/partial frames/disconnect/reconnect, setup validation, command/keymap registration, prompt flow.
 
 ---
 

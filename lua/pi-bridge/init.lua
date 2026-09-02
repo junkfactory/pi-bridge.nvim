@@ -1,4 +1,6 @@
 local log = require("pi-bridge.log")
+local socket = require("pi-bridge.socket")
+local context = require("pi-bridge.context")
 
 local M = {}
 
@@ -47,6 +49,31 @@ local function validate_config(cfg)
 	return nil
 end
 
+local function socket_path()
+	local cwd = vim.fn.getcwd()
+	local hash = vim.fn.sha256(cwd)
+	return vim.fn.expand("~/.pi/agent/pi-bridge/sockets/") .. hash .. ".sock"
+end
+
+local function ensure_connection()
+	if socket.is_connected() then return true end
+
+	local path = socket_path()
+	log.info("connecting to " .. path)
+
+	local ok = socket.connect(path, function(msg)
+		log.info("received: " .. vim.json.encode(msg))
+		-- Phase 4: dispatch to handlers
+	end)
+
+	if not ok then
+		log.warn("connection failed to " .. path)
+		return false
+	end
+
+	return true
+end
+
 local function register_keymaps(cfg)
 	if cfg.keymaps == false then return end
 	if cfg.keymaps.prompt then
@@ -75,8 +102,7 @@ function M.setup(opts)
 
 	local err = validate_config(cfg)
 	if err then
-		vim.notify("pi-bridge: " .. err, vim.log.levels.ERROR)
-		return
+		error("pi-bridge: " .. err)
 	end
 
 	config = cfg
@@ -100,6 +126,13 @@ function M.setup(opts)
 	register_command()
 	register_keymaps(config)
 
+	vim.api.nvim_create_autocmd("VimLeavePre", {
+		group = vim.api.nvim_create_augroup("pi-bridge", { clear = true }),
+		callback = function()
+			socket.disconnect()
+		end,
+	})
+
 	log.info("setup complete")
 end
 
@@ -109,8 +142,39 @@ function M.prompt(opts)
 		return
 	end
 	opts = opts or {}
-	log.info("prompt called" .. (opts.text and (": " .. opts.text) or ""))
-	-- Phase 2: wire to context + socket
+
+	local mode = opts.mode or "normal"
+	if vim.fn.mode() == "v" or vim.fn.mode() == "\22" then
+		mode = "visual"
+	end
+
+	local function send(text)
+		if not text or text == "" then return end
+
+		local ctx = context.get(mode)
+		log.info("prompt: " .. text .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")
+
+		if not ensure_connection() then
+			vim.notify("pi-bridge: not connected. Is pi running?", vim.log.levels.ERROR)
+			return
+		end
+
+		socket.send({
+			type = "prompt",
+			text = text,
+			context = ctx,
+		})
+	end
+
+	if opts.text then
+		send(opts.text)
+	else
+		vim.ui.input({ prompt = "pi > " }, function(input)
+			vim.schedule(function()
+				send(input)
+			end)
+		end)
+	end
 end
 
 function M.get_config()
