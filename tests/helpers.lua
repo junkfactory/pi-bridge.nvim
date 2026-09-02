@@ -81,7 +81,7 @@ function H.mock_server(socket_path)
 		end,
 		stop = function()
 			for _, client in ipairs(clients) do
-				if not client and not client:is_closing() then
+				if client and not client:is_closing() then
 					client:close()
 				end
 			end

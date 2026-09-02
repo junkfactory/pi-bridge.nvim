@@ -57,7 +57,28 @@ local function process_buffer(buf, on_message)
 	return buf
 end
 
-function M.connect(path, on_message, timeout)
+-- Notify the owner about a remote-side disconnect exactly once per
+-- connection loss. Called only from EOF/read-error/overflow paths,
+-- never from local disconnect(). Guarded so that multiple close
+-- triggers (e.g. read_err followed by EOF) fire the callback once.
+local function notify_remote_disconnect()
+	if not state then return end
+	if state.disconnect_notified then return end
+	state.disconnect_notified = true
+	if type(state.on_disconnect) == "function" then
+		local ok, err = pcall(state.on_disconnect)
+		if not ok then
+			log.error("on_disconnect handler error: " .. tostring(err))
+		end
+	end
+end
+
+function M.connect(path, on_message, on_disconnect, timeout)
+	-- Preserve the original (path, on_message, timeout) signature.
+	if type(on_disconnect) == "number" and timeout == nil then
+		timeout = on_disconnect
+		on_disconnect = nil
+	end
 	if state then
 		log.debug("already connected to " .. state.path)
 		return true
@@ -92,18 +113,22 @@ function M.connect(path, on_message, timeout)
 			pipe = pipe,
 			path = path,
 			on_message = on_message,
+			on_disconnect = on_disconnect,
 			read_buffer = "",
+			disconnect_notified = false,
 		}
 
 		pipe:read_start(function(read_err, data)
 			if read_err then
 				log.error("read error: " .. tostring(read_err))
+				notify_remote_disconnect()
 				M.disconnect()
 				return
 			end
 
 			if data == nil then
 				log.info("connection closed (EOF)")
+				notify_remote_disconnect()
 				M.disconnect()
 				return
 			end
@@ -112,6 +137,7 @@ function M.connect(path, on_message, timeout)
 
 			if #state.read_buffer > MAX_BUFFER then
 				log.warn("read buffer overflow, dropping connection")
+				notify_remote_disconnect()
 				M.disconnect()
 				return
 			end

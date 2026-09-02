@@ -189,4 +189,111 @@ T["socket"]["reconnect after disconnect"] = function()
 	helpers.rmdir(dir)
 end
 
+-- Remote disconnect callback
+--
+-- EOF on the read pipe indicates the peer closed the connection
+-- unexpectedly. The on_disconnect callback fires once for that event;
+-- an explicit local disconnect() does not fire it. A subsequent
+-- remote EOF after a manual reconnect is a fresh event.
+
+T["socket"]["on_disconnect fires on remote EOF"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+	local server = helpers.mock_server(path)
+
+	child.lua(string.format(
+		[[
+		_G._disconnect_count = 0
+		require('pi-bridge.socket').connect(%q, function() end, function()
+			_G._disconnect_count = _G._disconnect_count + 1
+		end)
+		]],
+		path
+	))
+	vim.uv.sleep(200)
+	expect.equality(child.lua("return _G._disconnect_count"), 0)
+
+	-- Stop the server side: client observes EOF on its read pipe.
+	server.stop()
+	vim.uv.sleep(300)
+
+	expect.equality(child.lua("return _G._disconnect_count"), 1)
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), false)
+
+	helpers.rmdir(dir)
+end
+
+T["socket"]["on_disconnect does not fire on local disconnect"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+	local server = helpers.mock_server(path)
+
+	child.lua(string.format(
+		[[
+		_G._disconnect_count = 0
+		require('pi-bridge.socket').connect(%q, function() end, function()
+			_G._disconnect_count = _G._disconnect_count + 1
+		end)
+		]],
+		path
+	))
+	vim.uv.sleep(200)
+
+	-- Local disconnect must NOT trigger the remote-disconnect callback.
+	child.lua("require('pi-bridge.socket').disconnect()")
+	vim.uv.sleep(200)
+
+	expect.equality(child.lua("return _G._disconnect_count"), 0)
+
+	server.stop()
+	helpers.rmdir(dir)
+end
+
+T["socket"]["on_disconnect fires exactly once per connection loss"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+	local server = helpers.mock_server(path)
+
+	child.lua(string.format(
+		[[
+		_G._disconnect_count = 0
+		require('pi-bridge.socket').connect(%q, function() end, function()
+			_G._disconnect_count = _G._disconnect_count + 1
+		end)
+		]],
+		path
+	))
+	vim.uv.sleep(200)
+
+	-- Stop the server, then wait long enough for both EOF and any
+	-- follow-up callbacks to land. The guard inside socket.lua must
+	-- keep the counter at exactly 1.
+	server.stop()
+	vim.uv.sleep(500)
+
+	expect.equality(child.lua("return _G._disconnect_count"), 1)
+
+	helpers.rmdir(dir)
+end
+
+T["socket"]["on_disconnect optional argument is backward compatible"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+	local server = helpers.mock_server(path)
+
+	-- Old call shape: only path + on_message. Must still work.
+	child.lua(string.format(
+		"require('pi-bridge.socket').connect(%q, function() end)",
+		path
+	))
+	vim.uv.sleep(200)
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	server.stop()
+	vim.uv.sleep(200)
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), false)
+
+	helpers.rmdir(dir)
+end
+
 return T

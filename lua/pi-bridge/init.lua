@@ -64,10 +64,21 @@ local function ensure_connection(cb)
 		dispatch.dispatch(msg)
 	end
 
+	-- Notify once per remote disconnect; never auto-launch from here.
+	-- Suppressed during local VimLeavePre cleanup so users do not see a
+	-- spurious message when they quit Neovim normally.
+	local on_disconnect = function()
+		vim.notify(
+			"pi-bridge: pi session disconnected; launch pi to reconnect",
+			vim.log.levels.WARN
+		)
+		log.info("remote disconnect from pi session")
+	end
+
 	resolve.find_socket(function(path)
 		if path then
 			log.info("connecting to " .. path)
-			if socket.connect(path, on_message) then
+			if socket.connect(path, on_message, on_disconnect) then
 				cb(true)
 				return
 			end
@@ -92,7 +103,7 @@ local function ensure_connection(cb)
 			end
 
 			resolve.clear_cache()
-			if socket.connect(cwd_path, on_message) then
+			if socket.connect(cwd_path, on_message, on_disconnect) then
 				log.info("connected after launch")
 				cb(true)
 			else

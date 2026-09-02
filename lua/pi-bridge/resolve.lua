@@ -137,6 +137,21 @@ end
 --- The callback is invoked exactly once, on the next libuv tick.
 ---@param cb fun(path: string|nil)
 function M.find_socket(cb)
+	-- Tests may provide an isolated socket path. Require an explicit test
+	-- guard so this cannot accidentally redirect normal project discovery.
+	local test_socket = vim.env.ENV_TEST_SOCKET_PATH
+	if vim.env.PI_BRIDGE_TESTING == "1" and test_socket and test_socket ~= "" then
+		local p = probe(test_socket)
+		if p.ok then
+			log.debug("resolve: using test socket " .. test_socket)
+			cb(test_socket)
+		else
+			log.debug("resolve: test socket unavailable (" .. (p.reason or "unreachable") .. ")")
+			cb(nil)
+		end
+		return
+	end
+
 	if cached_path then
 		-- Validate cached path is still alive
 		local cached = probe(cached_path)

@@ -2,6 +2,7 @@ local MiniTest = require("mini.test")
 local expect = MiniTest.expect
 
 local child = MiniTest.new_child_neovim()
+local helpers = dofile("tests/helpers.lua")
 
 local T = MiniTest.new_set()
 
@@ -156,6 +157,131 @@ T["init"]["resolve.socket_path_for_dir uses sha256 of cwd"] = function()
 	expect.equality(result.path:find("%.sock$") ~= nil, true)
 	expect.equality(result.has_sock_dir, true)
 	expect.equality(result.hex_len, 16)
+end
+
+-- Remote disconnect notification
+--
+-- When the persistent socket observes an unexpected EOF/error from the
+-- pi side, init.lua must surface a notification but must NOT auto-launch
+-- a new pi from the callback. VimLeavePre cleanup is a local disconnect
+-- and must not trigger a notification.
+
+T["init"]["remote disconnect surfaces a notification"] = function()
+	-- Stub helpers.lua-style mock_server in the child, connect via real
+	-- socket.connect(), then stop the server to simulate remote EOF.
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		-- capture notifications
+		_G._notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G._notifications, { msg = msg, level = level })
+		end
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+		require('pi-bridge').prompt({ text = 'first' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	-- Stop the server: remote EOF. init.lua's callback must fire once.
+	child.lua("_G._test_server.stop()")
+	child.lua("vim.wait(400)")
+
+	local notifications = child.lua([[
+		return vim.tbl_map(function(n) return n.msg end, _G._notifications)
+	]])
+	local saw_disconnect = false
+	for _, msg in ipairs(notifications) do
+		if msg:match("pi session disconnected") then
+			saw_disconnect = true
+			break
+		end
+	end
+	expect.equality(saw_disconnect, true)
+
+	-- Notification must NOT auto-launch: a subsequent prompt with no
+	-- server and auto_launch=false must fail with the standard
+	-- "no active pi" path, not silently relaunch.
+	child.lua([[
+		require('pi-bridge.socket').disconnect()
+		_G._notifications = {}
+		-- Stub launch so any accidental relaunch would be visible.
+		local launch = require('pi-bridge.launch')
+		_G._launch_called = false
+		launch.prompt_launch = function(_, _, cb)
+			_G._launch_called = true
+			cb(false)
+		end
+	]])
+
+	local launch_called = child.lua([[
+		-- resolve must not find a socket (we stopped it) and auto_launch=false
+		require('pi-bridge').prompt({ text = 'no server' })
+		vim.wait(800, function()
+			return #_G._notifications > 0 or _G._launch_called
+		end, 30)
+		return _G._launch_called
+	]])
+	expect.equality(launch_called, false)
+
+	helpers.rmdir(dir)
+end
+
+T["init"]["local disconnect does not notify"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		_G._notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G._notifications, { msg = msg, level = level })
+		end
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+		require('pi-bridge').prompt({ text = 'setup' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	-- Simulate the VimLeavePre autocmd handler: explicit local
+	-- disconnect(). Must NOT produce a "pi session disconnected"
+	-- notification.
+	child.lua([[
+		require('pi-bridge.socket').disconnect()
+		vim.wait(100, function() return not require('pi-bridge.socket').is_connected() end, 20)
+	]])
+	vim.uv.sleep(200)
+
+	local saw_disconnect = false
+	local notifications = child.lua("return _G._notifications or {}")
+	for _, n in ipairs(notifications) do
+		if n.msg and n.msg:match("pi session disconnected") then
+			saw_disconnect = true
+			break
+		end
+	end
+	expect.equality(saw_disconnect, false)
+
+	child.lua("_G._test_server.stop()")
+	helpers.rmdir(dir)
 end
 
 return T
