@@ -22,11 +22,13 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 ```lua
 {
   "junkfactory/pi-bridge.nvim",
-  config = function()
-    require("pi-bridge").setup()
-  end,
+  opts = {
+    -- see Setup section for all options
+  },
 }
 ```
+
+lazy.nvim automatically calls `require("pi-bridge").setup(opts)` — no `config = function()` needed.
 
 ### Native packages
 
@@ -48,9 +50,9 @@ Clone the repo and point your plugin manager at it. Edits under `lua/` are picke
 {
   dir = "/absolute/path/to/pi-bridge.nvim",
   name = "pi-bridge.nvim",  -- preserve the plugin name for lazy's bookkeeping
-  config = function()
-    require("pi-bridge").setup()
-  end,
+  opts = {
+    -- see Setup section for all options
+  },
 }
 ```
 
