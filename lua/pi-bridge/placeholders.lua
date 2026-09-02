@@ -102,10 +102,71 @@ local function resolve_diagnostics()
 	return table.concat(lines, "\n")
 end
 
+local function resolve_buffer()
+	return vim.api.nvim_buf_get_name(0)
+end
+
+local function resolve_buffers()
+	local paths = {}
+	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.bo[bufnr].buflisted then
+			local name = vim.api.nvim_buf_get_name(bufnr)
+			if name ~= "" then
+				table.insert(paths, name)
+			end
+		end
+	end
+	return table.concat(paths, "\n")
+end
+
+-- 900 KiB cap so payloads stay well under typical socket/transport limits
+-- while still preserving meaningful context.
+local CONTENT_BYTE_LIMIT = 900 * 1024
+
+local function format_truncation_notice(shown, total, bytes_total)
+	local mb_total = bytes_total / (1024 * 1024)
+	return string.format(
+		"[truncated: showing %d of %d lines, ~900KB of ~%.2fMB]",
+		shown,
+		total,
+		mb_total
+	)
+end
+
+local function resolve_content()
+	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local total = #lines
+	local content = table.concat(lines, "\n")
+
+	if #content <= CONTENT_BYTE_LIMIT then
+		return content
+	end
+
+	-- Take lines from the top until we'd exceed the byte budget, leaving
+	-- room for the truncation notice itself.
+	local kept = {}
+	local kept_bytes = 0
+	for i, line in ipairs(lines) do
+		-- +1 accounts for the joining newline between lines
+		local line_bytes = #line + 1
+		if kept_bytes + line_bytes > CONTENT_BYTE_LIMIT then
+			break
+		end
+		table.insert(kept, line)
+		kept_bytes = kept_bytes + line_bytes
+	end
+
+	local shown = #kept
+	return table.concat(kept, "\n") .. "\n" .. format_truncation_notice(shown, total, #content)
+end
+
 local RESOLVERS = {
 	this = resolve_this,
 	selection = resolve_selection,
 	diagnostics = resolve_diagnostics,
+	buffer = resolve_buffer,
+	buffers = resolve_buffers,
+	content = resolve_content,
 }
 
 M.PLACEHOLDERS = vim.tbl_keys(RESOLVERS)

@@ -70,10 +70,10 @@ Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re
 
 ## Usage
 
-| Mode   | Mapping      | Action                                                              |
-|--------|--------------|---------------------------------------------------------------------|
-| Normal | `<leader>ai` | Send prompt (use `@this`, `@selection`, `@diagnostics` for context) |
-| Visual | `<leader>ai` | Send prompt + selection as context                                  |
+| Mode   | Mapping      | Action                                                                                                 |
+|--------|--------------|--------------------------------------------------------------------------------------------------------|
+| Normal | `<leader>ai` | Send prompt (use `@this`, `@selection`, `@buffer`, `@buffers`, `@content`, `@diagnostics` for context) |
+| Visual | `<leader>ai` | Send prompt + selection as context                                                                     |
 
 Or use the command:
 
@@ -88,11 +88,14 @@ All responses render in pi's TUI — streaming text, tool calls, diffs, etc.
 
 Include context directly in your message using placeholders:
 
-| Placeholder    | Replaces with                           | Example                         |
-|----------------|-----------------------------------------|---------------------------------|
-| `@this`        | Current line with line number           | `line 25: local x = 1`          |
-| `@selection`   | Visual selection (empty in normal mode) | Selected text                   |
-| `@diagnostics` | LSP diagnostics for current buffer      | `L1:C1 [ERROR] unused variable` |
+| Placeholder    | Replaces with                                            | Example                         |
+|----------------|----------------------------------------------------------|---------------------------------|
+| `@this`        | Current line with line number                            | `line 25: local x = 1`          |
+| `@selection`   | Visual selection (empty in normal mode)                  | Selected text                   |
+| `@buffer`      | Absolute path to current buffer                          | `/path/to/file.lua`             |
+| `@buffers`     | Newline-separated list of open buffer paths              | `/path/a.lua\n/path/b.lua`      |
+| `@content`     | Content of current buffer (truncated at ~900KB if large) | Full buffer contents            |
+| `@diagnostics` | LSP diagnostics for current buffer                       | `L1:C1 [ERROR] unused variable` |
 
 Examples:
 
@@ -101,6 +104,9 @@ Examples:
 :PiBridge explain @selection
 :PiBridge fix these @diagnostics
 :PiBridge refactor @this and check @diagnostics
+:PiBridge review @buffer
+:PiBridge summarize @content
+:PiBridge compare @buffers
 ```
 
 Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocomplete suggestions.
