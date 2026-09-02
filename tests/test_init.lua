@@ -144,17 +144,18 @@ T["init"]["prompt with text skips input"] = function()
 	expect.equality(ok, true)
 end
 
-T["init"]["socket_path uses sha256 of cwd"] = function()
+T["init"]["resolve.socket_path_for_dir uses sha256 of cwd"] = function()
 	child.lua("require('pi-bridge').setup()")
-	local path = child.lua([[
+	local result = child.lua([[
+		local resolve = require('pi-bridge.resolve')
 		local cwd = vim.fn.getcwd()
-		local hash = vim.fn.sha256(cwd):sub(1, 16)
-		return vim.fn.expand('~/.pi/agent/pi-bridge/sockets/') .. hash .. '.sock'
+		local path = resolve.socket_path_for_dir(cwd)
+		local hex = path:match('([^/]+)%.sock$')
+		return { path = path, hex_len = #hex, has_sock_dir = path:find('pi%-bridge/sockets/') ~= nil }
 	]])
-	expect.equality(path:find("%.sock$") ~= nil, true)
-	expect.equality(path:find("pi%-bridge/sockets/") ~= nil, true)
-	local hex = path:match("([^/]+)%.sock$")
-	expect.equality(#hex, 16)
+	expect.equality(result.path:find("%.sock$") ~= nil, true)
+	expect.equality(result.has_sock_dir, true)
+	expect.equality(result.hex_len, 16)
 end
 
 return T

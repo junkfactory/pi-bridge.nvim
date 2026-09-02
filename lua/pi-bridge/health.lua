@@ -64,17 +64,17 @@ local function check_socket_status()
 	if socket.is_connected() then
 		vim.health.ok("Socket: connected")
 	else
-		-- Check if the expected socket file exists
-		local cwd = vim.fn.getcwd()
-		local hash = vim.fn.sha256(cwd):sub(1, 16)
-		local path = SOCKET_DIR .. hash .. ".sock"
-		local stat = vim.uv.fs_stat(path)
-		if stat then
-			vim.health.warn("Socket file exists but not connected: " .. path, {
+		local resolve = require("pi-bridge.resolve")
+		local found = nil
+		resolve.find_socket(function(path)
+			found = path
+		end)
+		if found then
+			vim.health.warn("Socket file exists but not connected: " .. found, {
 				"Run :PiBridge to connect",
 			})
 		else
-			vim.health.info("Socket: not connected (no socket file for current cwd)")
+			vim.health.info("Socket: not connected (no active socket in cwd or parent directories)")
 		end
 	end
 end

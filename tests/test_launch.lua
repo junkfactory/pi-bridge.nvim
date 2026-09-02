@@ -218,6 +218,11 @@ end
 
 T["launch"]["ensure_connection skips launch when auto_launch is false"] = function()
 	child.lua([[
+		-- cd to a temp dir so resolve.find_socket() doesn't find a real socket
+		local tmp = vim.fn.tempname()
+		vim.fn.mkdir(tmp, 'p')
+		vim.cmd.cd(tmp)
+
 		require('pi-bridge').setup({ auto_launch = false })
 		vim.ui.select = function(items, opts, on_choice)
 			_G._ui_called = true

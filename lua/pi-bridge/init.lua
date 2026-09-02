@@ -5,6 +5,7 @@ local launch = require("pi-bridge.launch")
 local dispatch = require("pi-bridge.dispatch")
 local ui = require("pi-bridge.ui")
 local placeholders = require("pi-bridge.placeholders")
+local resolve = require("pi-bridge.resolve")
 
 local M = {}
 
@@ -53,58 +54,56 @@ local function validate_config(cfg)
 	return nil
 end
 
-local function socket_path()
-	local cwd = vim.fn.getcwd()
-	local hash = vim.fn.sha256(cwd):sub(1, 16)
-	return vim.fn.expand("~/.pi/agent/pi-bridge/sockets/") .. hash .. ".sock"
-end
-
 local function ensure_connection(cb)
 	if socket.is_connected() then
 		cb(true)
 		return
 	end
 
-	local path = socket_path()
-	log.info("connecting to " .. path)
-
 	local on_message = function(msg)
 		dispatch.dispatch(msg)
 	end
 
-	if socket.connect(path, on_message) then
-		cb(true)
-		return
-	end
+	resolve.find_socket(function(path)
+		if path then
+			log.info("connecting to " .. path)
+			if socket.connect(path, on_message) then
+				cb(true)
+				return
+			end
+			log.warn("connection failed to " .. path)
+		end
 
-	log.warn("connection failed to " .. path)
-
-	if not config.auto_launch then
-		vim.notify(
-			"pi-bridge: socket not found. Launch pi manually.",
-			vim.log.levels.ERROR
-		)
-		cb(false)
-		return
-	end
-
-	launch.prompt_launch(config, path, function(launched)
-		if not launched then
+		if not config.auto_launch then
+			vim.notify(
+				"pi-bridge: no active pi instance found. Launch pi manually in this project or a parent directory.",
+				vim.log.levels.ERROR
+			)
 			cb(false)
 			return
 		end
 
-		if socket.connect(path, on_message) then
-			log.info("connected after launch")
-			cb(true)
-		else
-			log.warn("still cannot connect after launch")
-			vim.notify(
-				"pi-bridge: launched pi but socket still unreachable",
-				vim.log.levels.ERROR
-			)
-			cb(false)
-		end
+		-- Use current cwd's socket path as the launch target
+		local cwd_path = resolve.socket_path_for_dir(vim.fn.getcwd())
+		launch.prompt_launch(config, cwd_path, function(launched)
+			if not launched then
+				cb(false)
+				return
+			end
+
+			resolve.clear_cache()
+			if socket.connect(cwd_path, on_message) then
+				log.info("connected after launch")
+				cb(true)
+			else
+				log.warn("still cannot connect after launch")
+				vim.notify(
+					"pi-bridge: launched pi but socket still unreachable",
+					vim.log.levels.ERROR
+				)
+				cb(false)
+			end
+		end)
 	end)
 end
 
