@@ -61,20 +61,22 @@ end
 local function resolve_diagnostics()
 	local all_diags = vim.diagnostic.get(0)
 
-	local clients = vim.lsp.get_clients({ bufnr = 0 })
-	local namespaces = {}
-	for _, client in ipairs(clients) do
-		local ns = vim.lsp.diagnostic.get_namespace(client.id)
-		if ns then
-			namespaces[ns] = true
+	-- Collect all LSP diagnostic namespaces (both push and pull models).
+	-- Neovim 0.10+ uses pull diagnostics by default for many servers,
+	-- which store diagnostics under a different namespace than the
+	-- traditional push model. We match by the nvim.lsp.* naming pattern.
+	local lsp_namespaces = {}
+	for ns_id, ns_meta in pairs(vim.diagnostic.get_namespaces()) do
+		if ns_meta.name and ns_meta.name:find("^nvim%.lsp%.") then
+			lsp_namespaces[ns_id] = true
 		end
 	end
 
 	local diags = all_diags
-	if not vim.tbl_isempty(namespaces) then
+	if not vim.tbl_isempty(lsp_namespaces) then
 		diags = {}
 		for _, diag in ipairs(all_diags) do
-			if namespaces[diag.namespace] then
+			if lsp_namespaces[diag.namespace] then
 				table.insert(diags, diag)
 			end
 		end
