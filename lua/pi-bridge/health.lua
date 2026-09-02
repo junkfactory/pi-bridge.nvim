@@ -137,9 +137,7 @@ local function check_socket_status()
 
 	if probe.accepts then
 		-- Server is up and listening, but Neovim hasn't connected.
-		vim.health.info("Socket available, Neovim not connected: " .. cwd_path, {
-			"Run :PiBridge to send a prompt",
-		})
+		vim.health.info("Socket available, Neovim not connected: " .. cwd_path .. " (run :PiBridge to send a prompt)")
 		return
 	end
 
@@ -162,6 +160,17 @@ local function check_socket_status()
 	vim.health.info("Socket: not connected (no socket file in cwd)")
 end
 
+local function check_log_file()
+	local log_path = vim.fn.stdpath("log") .. "/pi-bridge.nvim.log"
+	local stat = vim.uv.fs_stat(log_path)
+	if stat then
+		local size_kb = math.floor(stat.size / 1024)
+		vim.health.ok("Log file: " .. log_path .. " (" .. size_kb .. " KB)")
+	else
+		vim.health.info("Log file not yet created: " .. log_path)
+	end
+end
+
 function M.check()
 	vim.health.start("pi-bridge.nvim")
 
@@ -170,6 +179,7 @@ function M.check()
 	check_extension()
 	check_autochdir()
 	check_socket_status()
+	check_log_file()
 end
 
 return M

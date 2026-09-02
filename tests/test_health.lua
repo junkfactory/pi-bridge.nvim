@@ -352,4 +352,106 @@ T["health"]["reports info when no socket file in cwd"] = function()
 	expect.equality(has_unavailable_info, true)
 end
 
+-- Log file: reports path and size when log exists
+
+T["health"]["reports log file location when log exists"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		-- Create a fake log file so check_log_file finds it
+		local log_path = vim.fn.stdpath('log') .. '/pi-bridge.nvim.log'
+		vim.fn.mkdir(vim.fn.fnamemodify(log_path, ':h'), 'p')
+		local f = io.open(log_path, 'w')
+		f:write('test log entry\n')
+		f:close()
+
+		require('pi-bridge.health').check()
+		os.remove(log_path)
+		return _G.health_output
+	]])
+	local has_log_ok = false
+	for _, entry in ipairs(result) do
+		if entry.kind == 'ok' and entry.msg and entry.msg:find('Log file:') and entry.msg:find('pi%-bridge%.nvim%.log') then
+			has_log_ok = true
+			break
+		end
+	end
+	expect.equality(has_log_ok, true)
+end
+
+-- Log file: reports info when log does not exist
+
+T["health"]["reports info when log file not yet created"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		-- Ensure no log file exists
+		local log_path = vim.fn.stdpath('log') .. '/pi-bridge.nvim.log'
+		os.remove(log_path)
+
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local has_log_info = false
+	for _, entry in ipairs(result) do
+		if entry.kind == 'info' and entry.msg and entry.msg:find('Log file not yet created') and entry.msg:find('pi%-bridge%.nvim%.log') then
+			has_log_info = true
+			break
+		end
+	end
+	expect.equality(has_log_info, true)
+end
+
+-- vim.health.info receives exactly 1 argument (no advice table)
+
+T["health"]["info calls receive only 1 argument"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		_G.info_args = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) end,
+			warn = function(msg, adv) end,
+			error = function(msg, adv) end,
+			info = function(msg, ...)
+				table.insert(_G.info_args, { msg = msg, extra = select('#', ...) })
+			end,
+		}
+		-- Force disconnected + no socket file to trigger info paths
+		local socket = require('pi-bridge.socket')
+		socket.is_connected = function() return false end
+		local sub = vim.fn.tempname() .. '/health-info-args'
+		vim.fn.mkdir(sub, 'p')
+		vim.cmd.cd(sub)
+
+		require('pi-bridge.health').check()
+		return _G.info_args
+	]])
+	-- Every info() call should have exactly 0 extra args
+	local all_single = true
+	for _, entry in ipairs(result) do
+		if entry.extra ~= 0 then
+			all_single = false
+			break
+		end
+	end
+	expect.equality(all_single, true)
+	-- Should have at least one info call (socket + log)
+	expect.equality(#result > 0, true)
+end
+
 return T
