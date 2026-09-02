@@ -61,7 +61,7 @@ local function check_socket_status()
 	else
 		-- Check if the expected socket file exists
 		local cwd = vim.fn.getcwd()
-		local hash = vim.fn.sha256(cwd)
+		local hash = vim.fn.sha256(cwd):sub(1, 16)
 		local path = SOCKET_DIR .. hash .. ".sock"
 		local stat = vim.uv.fs_stat(path)
 		if stat then

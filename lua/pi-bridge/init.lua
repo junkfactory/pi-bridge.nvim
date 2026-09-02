@@ -54,7 +54,7 @@ end
 
 local function socket_path()
 	local cwd = vim.fn.getcwd()
-	local hash = vim.fn.sha256(cwd)
+	local hash = vim.fn.sha256(cwd):sub(1, 16)
 	return vim.fn.expand("~/.pi/agent/pi-bridge/sockets/") .. hash .. ".sock"
 end
 

@@ -148,13 +148,13 @@ T["init"]["socket_path uses sha256 of cwd"] = function()
 	child.lua("require('pi-bridge').setup()")
 	local path = child.lua([[
 		local cwd = vim.fn.getcwd()
-		local hash = vim.fn.sha256(cwd)
+		local hash = vim.fn.sha256(cwd):sub(1, 16)
 		return vim.fn.expand('~/.pi/agent/pi-bridge/sockets/') .. hash .. '.sock'
 	]])
 	expect.equality(path:find("%.sock$") ~= nil, true)
 	expect.equality(path:find("pi%-bridge/sockets/") ~= nil, true)
 	local hex = path:match("([^/]+)%.sock$")
-	expect.equality(#hex, 64)
+	expect.equality(#hex, 16)
 end
 
 return T

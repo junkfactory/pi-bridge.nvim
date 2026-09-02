@@ -34,7 +34,7 @@ local function spawn_mock_at_socket_path()
 		local helpers = dofile('tests/helpers.lua')
 		-- mirror the path init.lua computes
 		local cwd = vim.fn.getcwd()
-		local hash = vim.fn.sha256(cwd)
+		local hash = vim.fn.sha256(cwd):sub(1, 16)
 		local path = vim.fn.expand('~/.pi/agent/pi-bridge/sockets/') .. hash .. '.sock'
 		vim.fn.mkdir(vim.fn.fnamemodify(path, ':h'), 'p')
 		local server = helpers.mock_server(path)
@@ -195,7 +195,7 @@ T["launch"]["ensure_connection launches then connects and sends"] = function()
 
 		-- compute the socket path we'll fake
 		local sock = vim.fn.expand('~/.pi/agent/pi-bridge/sockets/')
-			.. vim.fn.sha256(vim.fn.getcwd()) .. '.sock'
+			.. vim.fn.sha256(vim.fn.getcwd()):sub(1, 16) .. '.sock'
 		vim.fn.mkdir(vim.fn.fnamemodify(sock, ':h'), 'p')
 
 		-- start a delayed mock server that will create the socket file
