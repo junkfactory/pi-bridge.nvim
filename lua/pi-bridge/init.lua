@@ -2,6 +2,8 @@ local log = require("pi-bridge.log")
 local socket = require("pi-bridge.socket")
 local context = require("pi-bridge.context")
 local launch = require("pi-bridge.launch")
+local dispatch = require("pi-bridge.dispatch")
+local ui = require("pi-bridge.ui")
 
 local M = {}
 
@@ -66,8 +68,7 @@ local function ensure_connection(cb)
 	log.info("connecting to " .. path)
 
 	local on_message = function(msg)
-		log.info("received: " .. vim.json.encode(msg))
-		-- Phase 4: dispatch to handlers
+		dispatch.dispatch(msg)
 	end
 
 	if socket.connect(path, on_message) then
@@ -157,6 +158,10 @@ function M.setup(opts)
 	vim.g.loaded_pi_bridge = true
 	register_command()
 	register_keymaps(config)
+
+	dispatch.register("agent_start", ui.on_agent_start)
+	dispatch.register("agent_end", ui.on_agent_end)
+	dispatch.register("file_edited", ui.on_file_edited)
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = vim.api.nvim_create_augroup("pi-bridge", { clear = true }),

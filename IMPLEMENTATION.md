@@ -260,9 +260,11 @@ ensure_connection()
 
 ---
 
-### Phase 4: Outbound Events
+### Phase 4: Outbound Events ✅
 
 **Goal:** Receive events from pi and act on them in Neovim.
+
+**Status:** Complete. `dispatch.lua` and `ui.lua` implemented; `init.lua` wires handlers in `setup()`. 19 new tests; full suite 62/62 passing.
 
 | File                         | What to build                                                                                       |
 |------------------------------|-----------------------------------------------------------------------------------------------------|
