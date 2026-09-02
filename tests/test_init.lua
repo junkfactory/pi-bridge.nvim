@@ -137,12 +137,21 @@ T["init"]["prompt without setup shows error"] = function()
 end
 
 T["init"]["prompt with text skips input"] = function()
-	child.lua("require('pi-bridge').setup({ auto_launch = false })")
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+	]], path))
 	local ok = child.lua([[
 		local ok, err = pcall(require('pi-bridge').prompt, { text = 'test message' })
 		return ok
 	]])
 	expect.equality(ok, true)
+
+	helpers.rmdir(dir)
 end
 
 T["init"]["resolve.socket_path_for_dir uses sha256 of cwd"] = function()
