@@ -104,10 +104,11 @@ T["ui"]["on_file_edited highlights buffer for matching file"] = function()
 	child.lua([[
 		-- create a buffer with a known name
 		local buf = vim.api.nvim_create_buf(true, false)
-		vim.api.nvim_buf_set_name(buf, '/tmp/test_highlight.lua')
+		local test_file = vim.fn.tempname() .. '.lua'
+		vim.api.nvim_buf_set_name(buf, test_file)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'line1', 'line2', 'line3' })
 
-		require('pi-bridge.ui').on_file_edited({ type = 'file_edited', file = '/tmp/test_highlight.lua' })
+		require('pi-bridge.ui').on_file_edited({ type = 'file_edited', file = test_file })
 
 		-- check extmarks exist
 		local ns = vim.api.nvim_create_namespace('pi-bridge')
@@ -122,7 +123,8 @@ T["ui"]["on_file_edited does nothing for non-matching file"] = function()
 	child.lua([[
 		-- create a buffer with a different name
 		local buf = vim.api.nvim_create_buf(true, false)
-		vim.api.nvim_buf_set_name(buf, '/tmp/other_file.lua')
+		local test_file = vim.fn.tempname() .. '.lua'
+		vim.api.nvim_buf_set_name(buf, test_file)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'line1' })
 
 		require('pi-bridge.ui').on_file_edited({ type = 'file_edited', file = '/tmp/nonexistent.lua' })

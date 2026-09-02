@@ -27,12 +27,12 @@ function M.on_file_edited(msg)
 		return
 	end
 
-	local file = msg.file
+	local file = vim.fn.resolve(msg.file)
 	log.info("file_edited: " .. file)
 
 	-- Find buffers visiting this file
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == file then
+		if vim.api.nvim_buf_is_valid(buf) and vim.fn.resolve(vim.api.nvim_buf_get_name(buf)) == file then
 			-- Clear previous highlights
 			vim.api.nvim_buf_clear_namespace(buf, NAMESPACE, 0, -1)
 

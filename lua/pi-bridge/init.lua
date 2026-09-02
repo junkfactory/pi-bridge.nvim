@@ -4,6 +4,7 @@ local context = require("pi-bridge.context")
 local launch = require("pi-bridge.launch")
 local dispatch = require("pi-bridge.dispatch")
 local ui = require("pi-bridge.ui")
+local placeholders = require("pi-bridge.placeholders")
 
 local M = {}
 
@@ -188,6 +189,9 @@ function M.prompt(opts)
 	local function send(text)
 		if not text or text == "" then return end
 
+		-- Resolve @this, @selection, @diagnostics placeholders
+		local resolved = placeholders.resolve(text)
+
 		local ok_ctx, ctx = pcall(context.get, mode)
 		if not ok_ctx then
 			log.error("failed to gather context: " .. tostring(ctx))
@@ -195,7 +199,7 @@ function M.prompt(opts)
 			return
 		end
 
-		log.info("prompt: " .. text .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")
+		log.info("prompt: " .. resolved .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")
 
 		ensure_connection(function(ok)
 			if not ok then
@@ -205,7 +209,7 @@ function M.prompt(opts)
 
 			local ok_send, send_err = pcall(socket.send, {
 				type = "prompt",
-				text = text,
+				text = resolved,
 				context = ctx,
 			})
 			if not ok_send then
@@ -218,7 +222,28 @@ function M.prompt(opts)
 	if opts.text then
 		send(opts.text)
 	else
-		vim.ui.input({ prompt = "pi > " }, function(input)
+		vim.ui.input({
+			prompt = "pi > ",
+			completion = function(arglead, _cmdline, _cursorpos)
+				-- If user typed @ followed by partial text, suggest matching placeholders
+				local prefix = arglead:match("@(%w*)$")
+				if prefix then
+					local candidates = { "this", "selection", "diagnostics" }
+					local matches = {}
+					for _, c in ipairs(candidates) do
+						if c:find(prefix, 1, true) == 1 then
+							table.insert(matches, "@" .. c)
+						end
+					end
+					return matches
+				end
+				-- If user just typed @, suggest all placeholders
+				if arglead:match("@$") then
+					return { "@this", "@selection", "@diagnostics" }
+				end
+				return nil
+			end,
+		}, function(input)
 			vim.schedule(function()
 				send(input)
 			end)

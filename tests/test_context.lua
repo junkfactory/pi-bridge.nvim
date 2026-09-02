@@ -31,7 +31,7 @@ T["context"]["get returns file and cwd"] = function()
 	expect.equality(#result.cwd > 0, true)
 end
 
-T["context"]["get normal mode returns lightweight context"] = function()
+T["context"]["get normal mode returns metadata only"] = function()
 	child.lua([[
 		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
 		vim.api.nvim_win_set_cursor(0, { 2, 1 })
@@ -39,12 +39,11 @@ T["context"]["get normal mode returns lightweight context"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.context').get('normal')
 	]])
-	expect.equality(result.content, nil)
 	expect.equality(result.mode, "normal")
-	expect.equality(result.current_line, "bbb")
-	expect.equality(type(result.cursor), "table")
-	expect.equality(result.cursor.line, 2)
-	expect.equality(type(result.surrounding), "string")
+	expect.equality(result.content, nil)
+	expect.equality(result.cursor, nil)
+	expect.equality(result.current_line, nil)
+	expect.equality(result.surrounding, nil)
 end
 
 T["context"]["get defaults to normal mode"] = function()
@@ -56,22 +55,26 @@ T["context"]["get defaults to normal mode"] = function()
 	]])
 	expect.equality(result.mode, "normal")
 	expect.equality(result.content, nil)
-	expect.equality(result.current_line, "only")
+	expect.equality(result.current_line, nil)
 end
 
-T["context"]["get visual mode returns selection"] = function()
+T["context"]["get returns only metadata fields"] = function()
 	child.lua([[
-		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc', 'ddd' })
-		vim.api.nvim_win_set_cursor(0, { 2, 0 })
-		vim.cmd('normal! v')
-		vim.api.nvim_win_set_cursor(0, { 3, 999 })
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.bo.filetype = 'lua'
 	]])
 	local result = child.lua([[
-		return require('pi-bridge.context').get('visual')
+		return require('pi-bridge.context').get('normal')
 	]])
-	expect.equality(result.content:find("bbb") ~= nil, true)
-	expect.equality(result.content:find("ccc") ~= nil, true)
-	expect.equality(result.mode, "visual")
+	expect.equality(result.file ~= nil, true)
+	expect.equality(result.cwd ~= nil, true)
+	expect.equality(result.mode, "normal")
+	expect.equality(result.filetype, "lua")
+	-- content-bearing fields should be absent
+	expect.equality(result.content, nil)
+	expect.equality(result.cursor, nil)
+	expect.equality(result.current_line, nil)
+	expect.equality(result.surrounding, nil)
 end
 
 T["context"]["get_visual_selection returns lines"] = function()
@@ -102,17 +105,6 @@ T["context"]["get_visual_selection normalizes reversed selection"] = function()
 	expect.equality(#lines >= 1, true)
 end
 
-T["context"]["empty buffer returns empty surrounding"] = function()
-	child.lua([[
-		vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
-	]])
-	local result = child.lua([[
-		return require('pi-bridge.context').get('normal')
-	]])
-	expect.equality(result.content, nil)
-	expect.equality(result.surrounding, "")
-end
-
 T["context"]["get includes filetype"] = function()
 	child.lua([[
 		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
@@ -122,21 +114,6 @@ T["context"]["get includes filetype"] = function()
 		return require('pi-bridge.context').get('normal')
 	]])
 	expect.equality(result.filetype, "lua")
-end
-
-T["context"]["visual mode sends content not surrounding"] = function()
-	child.lua([[
-		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
-		vim.api.nvim_win_set_cursor(0, { 2, 0 })
-		vim.cmd('normal! v')
-		vim.api.nvim_win_set_cursor(0, { 2, 2 })
-	]])
-	local result = child.lua([[
-		return require('pi-bridge.context').get('visual')
-	]])
-	expect.equality(type(result.content), "string")
-	expect.equality(result.surrounding, nil)
-	expect.equality(result.cursor, nil)
 end
 
 return T

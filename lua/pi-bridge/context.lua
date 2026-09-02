@@ -29,8 +29,6 @@ function M.get_visual_selection()
 	return lines, start_line, end_line
 end
 
-local SURROUND_RADIUS = 10
-
 function M.get(mode)
 	mode = mode or "normal"
 
@@ -38,41 +36,11 @@ function M.get(mode)
 	local cwd = vim.fn.getcwd()
 	local filetype = vim.bo.filetype
 
-	local content
-	local cursor
-	local current_line
-	local surrounding
-
-	if mode == "visual" then
-		local lines = M.get_visual_selection()
-		if lines then
-			content = table.concat(lines, "\n")
-		end
-	else
-		-- normal mode: send lightweight context instead of full buffer
-		local pos = vim.api.nvim_win_get_cursor(0)
-		local row = pos[1]
-		local col = pos[2]
-		cursor = { line = row, col = col }
-		current_line = vim.api.nvim_get_current_line()
-
-		-- surrounding lines for local scope
-		local total = vim.api.nvim_buf_line_count(0)
-		local start = math.max(1, row - SURROUND_RADIUS)
-		local finish = math.min(total, row + SURROUND_RADIUS)
-		local lines = vim.api.nvim_buf_get_lines(0, start - 1, finish, false)
-		surrounding = table.concat(lines, "\n")
-	end
-
 	return {
 		file = file,
 		cwd = cwd,
-		content = content,
 		mode = mode,
 		filetype = filetype,
-		cursor = cursor,
-		current_line = current_line,
-		surrounding = surrounding,
 	}
 end
 

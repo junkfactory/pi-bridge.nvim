@@ -70,10 +70,10 @@ Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re
 
 ## Usage
 
-| Mode   | Mapping      | Action                                  |
-|--------|--------------|-----------------------------------------|
-| Normal | `<leader>ai` | Send prompt + current buffer as context |
-| Visual | `<leader>ai` | Send prompt + selection as context      |
+| Mode   | Mapping      | Action                                                              |
+|--------|--------------|---------------------------------------------------------------------|
+| Normal | `<leader>ai` | Send prompt (use `@this`, `@selection`, `@diagnostics` for context) |
+| Visual | `<leader>ai` | Send prompt + selection as context                                  |
 
 Or use the command:
 
@@ -83,6 +83,27 @@ Or use the command:
 ```
 
 All responses render in pi's TUI — streaming text, tool calls, diffs, etc.
+
+## Placeholders
+
+Include context directly in your message using placeholders:
+
+| Placeholder    | Replaces with                           | Example                         |
+|----------------|-----------------------------------------|---------------------------------|
+| `@this`        | Current line with line number           | `line 25: local x = 1`          |
+| `@selection`   | Visual selection (empty in normal mode) | Selected text                   |
+| `@diagnostics` | LSP diagnostics for current buffer      | `L1:C1 [ERROR] unused variable` |
+
+Examples:
+
+```vim
+:PiBridge fix @this
+:PiBridge explain @selection
+:PiBridge fix these @diagnostics
+:PiBridge refactor @this and check @diagnostics
+```
+
+Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocomplete suggestions.
 
 ## Setup
 
@@ -165,6 +186,17 @@ Logs to `vim.fn.stdpath("log") .. "/pi-bridge.nvim.log"` (resolves to `~/.local/
 - Auto-launch triggers
 - Messages sent to pi (prompt + context summary)
 - Events received from pi
+
+## Running Tests
+
+```bash
+make test                  # run all tests
+make test-context          # context module only
+make test-placeholders     # placeholders module only
+make test-init             # init module only
+```
+
+Requires Neovim 0.10+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
 
 ## Related
 
