@@ -203,4 +203,9 @@ function M.is_connected()
 	return state ~= nil
 end
 
+function M.get_path()
+	if state then return state.path end
+	return nil
+end
+
 return M

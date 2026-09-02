@@ -123,7 +123,12 @@ end
 local function check_socket_status()
 	local socket = require("pi-bridge.socket")
 	if socket.is_connected() then
-		vim.health.ok("Socket: connected")
+		local path = socket.get_path()
+		if path then
+			vim.health.ok("Socket: connected to " .. path)
+		else
+			vim.health.ok("Socket: connected")
+		end
 		return
 	end
 
