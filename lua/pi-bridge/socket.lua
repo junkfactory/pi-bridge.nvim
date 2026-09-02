@@ -43,10 +43,14 @@ local function process_buffer(buf, on_message)
 	return buf
 end
 
-function M.connect(path, on_message)
+function M.connect(path, on_message, timeout)
 	if state then
 		log.debug("already connected to " .. state.path)
 		return true
+	end
+
+	if type(timeout) ~= "number" then
+		timeout = 1000
 	end
 
 	local pipe = vim.uv.new_pipe(false)
@@ -55,16 +59,19 @@ function M.connect(path, on_message)
 		return false
 	end
 
-	local connected = false
+	local result = { ok = false, done = false }
 
 	pipe:connect(path, function(err)
 		if err then
 			log.info("connect failed: " .. tostring(err))
-			pipe:close()
+			result.ok = false
+			result.done = true
+			if not pipe:is_closing() then
+				pipe:close()
+			end
 			return
 		end
 
-		connected = true
 		log.info("connected to " .. path)
 
 		state = {
@@ -97,17 +104,24 @@ function M.connect(path, on_message)
 
 			state.read_buffer = process_buffer(state.read_buffer, state.on_message)
 		end)
+
+		result.ok = true
+		result.done = true
 	end)
 
-	-- wait briefly for synchronous connect or early error
-	vim.uv.run("nowait")
+	vim.wait(timeout, function()
+		return result.done
+	end, 20)
 
-	if not connected and pipe:is_closing() then
-		log.info("connect failed immediately")
+	if not result.done then
+		log.warn("connect timed out after " .. timeout .. "ms")
+		if not pipe:is_closing() then
+			pipe:close()
+		end
 		return false
 	end
 
-	return true
+	return result.ok
 end
 
 function M.send(msg)

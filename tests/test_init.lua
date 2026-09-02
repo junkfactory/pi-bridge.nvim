@@ -136,7 +136,7 @@ T["init"]["prompt without setup shows error"] = function()
 end
 
 T["init"]["prompt with text skips input"] = function()
-	child.lua("require('pi-bridge').setup()")
+	child.lua("require('pi-bridge').setup({ auto_launch = false })")
 	local ok = child.lua([[
 		local ok, err = pcall(require('pi-bridge').prompt, { text = 'test message' })
 		return ok

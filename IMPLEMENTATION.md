@@ -204,9 +204,11 @@ prompt(opts?)
 
 ---
 
-### Phase 3: Auto-Launch
+### Phase 3: Auto-Launch ✅
 
 **Goal:** If pi isn't running, offer to launch it. User must confirm.
+
+**Status:** Complete. `lua/pi-bridge/launch.lua` implemented; `socket.connect()` made blocking via `vim.wait()`; `init.lua`'s `ensure_connection()` refactored to callback-based to accommodate async launch. 8 launch tests added; full suite 43/43 passing.
 
 | File                       | What to build                                                                                             |
 |----------------------------|-----------------------------------------------------------------------------------------------------------|
@@ -246,6 +248,15 @@ ensure_connection()
 | Launch timeout             | `vim.notify("pi-bridge: pi failed to start within Ns", ERROR)`                    |
 
 **Exit criteria:** `<leader>ai` → no pi running → user confirms → pi launches in split → message sent. User declines → polite warning, no split opened.
+
+**Implementation notes:**
+
+- `socket.connect()` now blocks via `vim.wait(timeout, condition, interval)` so callers can rely on a real success/failure return (the previous async version returned `true` for in-flight connects, breaking the launch-retry path).
+- `prompt_launch(config, socket_path, on_ready)` is the public async API. It is callback-based because polling pi's socket appearance is fundamentally async.
+- Pending calls are coalesced via module-local `pending` queue — if a second `prompt_launch` runs while the first is polling, both callbacks fire with the same result (no double-launch).
+- If `is_pi_split_valid()` returns true at call time, the UI prompt is skipped and we go straight to polling (pi may be slow to start the socket, but the split is open).
+- Polling uses `vim.uv.new_timer()` at 200ms intervals — never `vim.wait` (would block the editor).
+- `pi_split = { win, buf }` is cleared lazily when `is_pi_split_valid()` detects the user closed the split.
 
 ---
 

@@ -1,4 +1,4 @@
-.PHONY: test test-log test-context test-socket test-init
+.PHONY: test test-log test-context test-socket test-init test-launch
 
 # Run all tests
 test:
@@ -21,3 +21,7 @@ test-socket:
 test-init:
 	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run_file('tests/test_init.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
+
+test-launch:
+	nvim --headless --noplugin -u scripts/minimal_init.lua \
+		-c "lua MiniTest.run_file('tests/test_launch.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"

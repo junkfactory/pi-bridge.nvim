@@ -1,6 +1,7 @@
 local log = require("pi-bridge.log")
 local socket = require("pi-bridge.socket")
 local context = require("pi-bridge.context")
+local launch = require("pi-bridge.launch")
 
 local M = {}
 
@@ -55,23 +56,54 @@ local function socket_path()
 	return vim.fn.expand("~/.pi/agent/pi-bridge/sockets/") .. hash .. ".sock"
 end
 
-local function ensure_connection()
-	if socket.is_connected() then return true end
+local function ensure_connection(cb)
+	if socket.is_connected() then
+		cb(true)
+		return
+	end
 
 	local path = socket_path()
 	log.info("connecting to " .. path)
 
-	local ok = socket.connect(path, function(msg)
+	local on_message = function(msg)
 		log.info("received: " .. vim.json.encode(msg))
 		-- Phase 4: dispatch to handlers
-	end)
-
-	if not ok then
-		log.warn("connection failed to " .. path)
-		return false
 	end
 
-	return true
+	if socket.connect(path, on_message) then
+		cb(true)
+		return
+	end
+
+	log.warn("connection failed to " .. path)
+
+	if not config.auto_launch then
+		vim.notify(
+			"pi-bridge: socket not found. Launch pi manually.",
+			vim.log.levels.ERROR
+		)
+		cb(false)
+		return
+	end
+
+	launch.prompt_launch(config, path, function(launched)
+		if not launched then
+			cb(false)
+			return
+		end
+
+		if socket.connect(path, on_message) then
+			log.info("connected after launch")
+			cb(true)
+		else
+			log.warn("still cannot connect after launch")
+			vim.notify(
+				"pi-bridge: launched pi but socket still unreachable",
+				vim.log.levels.ERROR
+			)
+			cb(false)
+		end
+	end)
 end
 
 local function register_keymaps(cfg)
@@ -154,16 +186,18 @@ function M.prompt(opts)
 		local ctx = context.get(mode)
 		log.info("prompt: " .. text .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")
 
-		if not ensure_connection() then
-			vim.notify("pi-bridge: not connected. Is pi running?", vim.log.levels.ERROR)
-			return
-		end
+		ensure_connection(function(ok)
+			if not ok then
+				vim.notify("pi-bridge: not connected. Is pi running?", vim.log.levels.ERROR)
+				return
+			end
 
-		socket.send({
-			type = "prompt",
-			text = text,
-			context = ctx,
-		})
+			socket.send({
+				type = "prompt",
+				text = text,
+				context = ctx,
+			})
+		end)
 	end
 
 	if opts.text then
