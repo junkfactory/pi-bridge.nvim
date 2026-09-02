@@ -113,4 +113,79 @@ T["placeholders"]["resolve handles nil input"] = function()
 	expect.equality(result, "")
 end
 
+T["placeholders"]["PLACEHOLDERS is a table with 3 entries"] = function()
+	local result = child.lua([[
+		local p = require('pi-bridge.placeholders')
+		return #p.PLACEHOLDERS
+	]])
+	expect.equality(result, 3)
+end
+
+T["placeholders"]["PLACEHOLDERS contains expected names"] = function()
+	local result = child.lua([[
+		local p = require('pi-bridge.placeholders')
+		local map = {}
+		for _, name in ipairs(p.PLACEHOLDERS) do
+			map[name] = true
+		end
+		return map
+	]])
+	expect.equality(result["this"], true)
+	expect.equality(result["selection"], true)
+	expect.equality(result["diagnostics"], true)
+end
+
+T["placeholders"]["PLACEHOLDERS is sorted alphabetically"] = function()
+	local result = child.lua([[
+		local p = require('pi-bridge.placeholders')
+		return p.PLACEHOLDERS
+	]])
+	expect.equality(result[1], "diagnostics")
+	expect.equality(result[2], "selection")
+	expect.equality(result[3], "this")
+end
+
+T["placeholders"]["complete returns all placeholders for bare @"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local result = child.lua([[
+		return _G._pi_bridge_complete("@", "", 0)
+	]])
+	-- Should return 3 items: @diagnostics, @selection, @this (sorted)
+	expect.equality(#result, 3)
+end
+
+T["placeholders"]["complete filters by prefix"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local result = child.lua([[
+		return _G._pi_bridge_complete("@th", "", 0)
+	]])
+	expect.equality(#result, 1)
+	expect.equality(result[1], "@this")
+end
+
+T["placeholders"]["complete filters @sel to @selection"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local result = child.lua([[
+		return _G._pi_bridge_complete("@sel", "", 0)
+	]])
+	expect.equality(#result, 1)
+	expect.equality(result[1], "@selection")
+end
+
+T["placeholders"]["complete returns empty for unknown prefix"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local result = child.lua([[
+		return _G._pi_bridge_complete("@xyz", "", 0)
+	]])
+	expect.equality(#result, 0)
+end
+
+T["placeholders"]["complete returns all for no @ in arglead"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local result = child.lua([[
+		return _G._pi_bridge_complete("hello", "", 0)
+	]])
+	expect.equality(#result, 3)
+end
+
 return T

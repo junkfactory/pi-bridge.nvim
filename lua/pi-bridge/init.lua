@@ -128,6 +128,25 @@ local function register_command()
 	end, { nargs = "?" })
 end
 
+_G._pi_bridge_complete = function(arglead, _cmdline, _cursorpos)
+	local names = require("pi-bridge.placeholders").PLACEHOLDERS
+	local prefix = arglead:match("@(%w*)$")
+	if not prefix then
+		local all = {}
+		for _, name in ipairs(names) do
+			table.insert(all, "@" .. name)
+		end
+		return all
+	end
+	local matches = {}
+	for _, name in ipairs(names) do
+		if name:find(prefix, 1, true) == 1 then
+			table.insert(matches, "@" .. name)
+		end
+	end
+	return matches
+end
+
 function M.setup(opts)
 	if config then return end -- already setup
 
@@ -223,25 +242,7 @@ function M.prompt(opts)
 	else
 		vim.ui.input({
 			prompt = "pi > ",
-			completion = function(arglead, _cmdline, _cursorpos)
-				-- If user typed @ followed by partial text, suggest matching placeholders
-				local prefix = arglead:match("@(%w*)$")
-				if prefix then
-					local candidates = { "this", "selection", "diagnostics" }
-					local matches = {}
-					for _, c in ipairs(candidates) do
-						if c:find(prefix, 1, true) == 1 then
-							table.insert(matches, "@" .. c)
-						end
-					end
-					return matches
-				end
-				-- If user just typed @, suggest all placeholders
-				if arglead:match("@$") then
-					return { "@this", "@selection", "@diagnostics" }
-				end
-				return nil
-			end,
+			completion = "customlist,v:lua._pi_bridge_complete",
 		}, function(input)
 			vim.schedule(function()
 				send(input)

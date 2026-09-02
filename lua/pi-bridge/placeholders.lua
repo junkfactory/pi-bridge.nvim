@@ -97,6 +97,9 @@ local RESOLVERS = {
 	diagnostics = resolve_diagnostics,
 }
 
+M.PLACEHOLDERS = vim.tbl_keys(RESOLVERS)
+table.sort(M.PLACEHOLDERS)
+
 function M.resolve(text)
 	if type(text) ~= "string" or text == "" then
 		return text or ""
