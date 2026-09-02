@@ -1,4 +1,4 @@
-.PHONY: test test-log test-context test-socket test-init test-launch test-placeholders test-dispatch test-ui test-health
+.PHONY: test test-log test-context test-socket test-init test-launch test-placeholders test-dispatch test-ui test-health test-resolve
 
 # Run all tests
 test:
@@ -6,13 +6,16 @@ test:
 		-c "lua MiniTest.run({ execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
 
 # Run individual test files
-test-dispatch:	nvim --headless --noplugin -u scripts/minimal_init.lua \
+test-dispatch:
+	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run_file('tests/test_dispatch.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
 
-test-ui:	nvim --headless --noplugin -u scripts/minimal_init.lua \
+test-ui:
+	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run_file('tests/test_ui.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
 
-test-health:	nvim --headless --noplugin -u scripts/minimal_init.lua \
+test-health:
+	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run_file('tests/test_health.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
 
 test-log:
@@ -38,3 +41,7 @@ test-launch:
 test-placeholders:
 	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run_file('tests/test_placeholders.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
+
+test-resolve:
+	nvim --headless --noplugin -u scripts/minimal_init.lua \
+		-c "lua MiniTest.run_file('tests/test_resolve.lua', { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"

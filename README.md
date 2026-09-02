@@ -154,9 +154,11 @@ keymaps = false,
 On `<leader>ai`:
 
 1. Get `cwd` from `vim.fn.getcwd()`
-2. Compute `sha256(cwd)` — same algorithm as pi-bridge.ext
-3. Connect to `~/.pi/agent/pi-bridge/sockets/<sha256>.sock`
-4. On failure → auto-launch pi (if enabled)
+2. Walk from `cwd` upward toward `$HOME`, probing each directory for an active socket
+3. The socket path is `~/.pi/agent/pi-bridge/sockets/<sha256(dir)>.sock` — same hash algorithm as pi-bridge.ext
+4. On no hit → auto-launch pi (if enabled)
+
+The upward walk means opening Neovim in `src/foo/bar/` finds the pi instance running at the project root without requiring `:cd` first. The walk stops at `$HOME` and never probes filesystem root.
 
 ### Auto-Launch
 
@@ -178,6 +180,32 @@ When the socket doesn't exist or connection fails:
 
 On `setup()`, warns if `vim.o.autochdir` is enabled — socket matching uses cwd, which `autochdir` changes per-file.
 
+## Cwd Contract
+
+Sockets are keyed by `sha256(cwd)`. Each project directory gets its own socket — there is no global singleton and no shared registry. The resolver walks from your current directory upward to `$HOME` to find the nearest active socket, which makes nested buffers work without configuration.
+
+`autochdir` is **not supported**. Because `autochdir` changes cwd per-buffer, the socket you reach depends on which file is active rather than which project you intended. The plugin warns on `setup()` if it is enabled and `:checkhealth pi-bridge` flags it under a dedicated `autochdir` line.
+
+For project switching, use:
+
+- `:cd {path}` — change cwd for the whole window
+- `:lcd {path}` — change cwd for the current window only
+
+Both work normally. Avoid `autochdir` and avoid changing cwd with autocommands that fire on every buffer change.
+
+### `:checkhealth pi-bridge` states
+
+Health distinguishes between "is there a server" and "is Neovim connected to it". Two different things, two different reports:
+
+| Output                                                                       | Meaning                                                                                |
+|------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| `OK Socket: connected`                                                       | Persistent Neovim connection is up. Sending prompts will work.                         |
+| `INFO Socket available, Neovim not connected: <path>`                        | pi is running but Neovim hasn't connected yet. Run `:PiBridge` to connect.             |
+| `WARN Socket file present but unreachable: <path> (<reason>)`                | Stale socket file from a previous crash. Remove it or relaunch pi.                     |
+| `INFO Socket: not connected (no socket file in cwd)`                         | No server in this cwd. Auto-launch will start one if enabled.                          |
+
+`:checkhealth` only inspects state; it never opens or closes the persistent connection.
+
 ## Logging
 
 Logs to `vim.fn.stdpath("log") .. "/pi-bridge.nvim.log"` (resolves to `~/.local/state/nvim/log/pi-bridge.nvim.log` on Linux).
@@ -194,6 +222,8 @@ make test                  # run all tests
 make test-context          # context module only
 make test-placeholders     # placeholders module only
 make test-init             # init module only
+make test-resolve          # socket resolver only
+make test-health           # :checkhealth only
 ```
 
 Requires Neovim 0.10+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
