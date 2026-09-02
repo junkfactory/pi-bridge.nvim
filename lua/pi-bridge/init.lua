@@ -241,7 +241,7 @@ function M.prompt(opts)
 		send(opts.text)
 	else
 		vim.ui.input({
-			prompt = "pi > ",
+			prompt = "π > ",
 			completion = "customlist,v:lua._pi_bridge_complete",
 		}, function(input)
 			vim.schedule(function()
