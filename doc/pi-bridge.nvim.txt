@@ -1,0 +1,147 @@
+*pi-bridge.nvim*  Neovim plugin for pi integration via Unix socket
+
+Author:  junkfactory
+License: MIT
+
+==============================================================================
+CONTENTS                                                  *pi-bridge-contents*
+
+1. Overview                                                 |pi-bridge-overview|
+2. Setup                                                       |pi-bridge-setup|
+3. Commands                                                 |pi-bridge-commands|
+4. Config                                                     |pi-bridge-config|
+5. Architecture                                           |pi-bridge-architecture|
+6. Troubleshooting                                     |pi-bridge-troubleshooting|
+
+==============================================================================
+1. Overview                                                 *pi-bridge-overview*
+
+pi-bridge.nvim connects Neovim to the pi coding agent via a Unix socket.
+Pairs with pi-bridge.ext (the pi extension side).
+
+Send prompts with buffer/selection context to pi directly from Neovim.
+Responses render in pi's TUI — no custom chat buffer needed.
+
+Requirements:
+- Neovim 0.10+
+- pi with pi-bridge.ext installed
+
+==============================================================================
+2. Setup                                                       *pi-bridge-setup*
+
+>lua
+    require("pi-bridge").setup({
+      split_direction = "vertical",
+      split_size = nil,
+      auto_launch = true,
+      launch_timeout = 10,
+      launch_cmd = { "pi" },
+      keymaps = { prompt = "<leader>ai" },
+      log_level = "info",
+    })
+<
+
+With lazy.nvim:
+>lua
+    {
+      "junkfactory/pi-bridge.nvim",
+      cmd = "PiBridge",
+      keys = { { "<leader>ai", mode = { "n", "v" } } },
+      opts = {},
+    }
+<
+
+With native packages (pack/start/):
+>lua
+    -- in your init.lua
+    require("pi-bridge").setup()
+<
+
+==============================================================================
+3. Commands                                                 *pi-bridge-commands*
+
+                                                          *:PiBridge*
+:PiBridge              Prompt for a message and send to pi.
+:PiBridge {message}    Send {message} directly to pi.
+
+Normal mode: sends prompt + current buffer as context.
+Visual mode: sends prompt + selection as context.
+
+Default keymap: <leader>ai (normal + visual mode)
+
+==============================================================================
+4. Config                                                     *pi-bridge-config*
+
+Default values:
+>lua
+    {
+      split_direction = "vertical",
+      split_size = nil,
+      auto_launch = true,
+      launch_timeout = 10,
+      launch_cmd = { "pi" },
+      keymaps = { prompt = "<leader>ai" },
+      log_level = "info",
+    }
+<
+
+                                          *pi-bridge-config.split_direction*
+split_direction ~
+  "vertical" or "horizontal". Direction for the pi terminal split.
+
+                                              *pi-bridge-config.split_size*
+split_size ~
+  nil or positive integer. Split size in columns (vertical) or lines
+  (horizontal). nil uses Neovim defaults (50%).
+
+                                            *pi-bridge-config.auto_launch*
+auto_launch ~
+  true or false. If true, offers to launch pi when no socket is found.
+  User is always prompted to confirm before launching.
+
+                                          *pi-bridge-config.launch_timeout*
+launch_timeout ~
+  Positive number. Max seconds to wait for pi's socket after launching.
+
+                                            *pi-bridge-config.launch_cmd*
+launch_cmd ~
+  Table of strings. Command to launch pi. Allows custom args, env, etc.
+
+                                              *pi-bridge-config.keymaps*
+keymaps ~
+  false or table. Set to false to disable default keymaps. Use
+  `keymaps = { prompt = "<leader>p" }` to remap.
+
+                                             *pi-bridge-config.log_level*
+log_level ~
+  "trace", "debug", "info", "warn", or "error". Default "info".
+
+==============================================================================
+5. Architecture                                       *pi-bridge-architecture*
+
+>text
+    ┌─────────────┐     Unix Socket     ┌─────────────────┐
+    │  pi (TUI)   │◄──────────────────► │ pi-bridge.nvim  │
+    │  + extension│     JSON msgs       │ (Lua)           │
+    └─────────────┘                     └─────────────────┘
+<
+
+Socket path: ~/.pi/agent/pi-bridge/sockets/<sha256(cwd)>.sock
+
+One socket per project directory. SHA256 of the absolute cwd path.
+
+==============================================================================
+6. Troubleshooting                                 *pi-bridge-troubleshooting*
+
+                                                  *pi-bridge-autochdir*
+autochdir ~
+  pi-bridge.nvim uses cwd for socket matching. If autochdir is enabled,
+  cwd changes per-file, which breaks socket discovery. Disable autochdir
+  or use :lcd/:cd for project-level switching.
+
+Log file: ~/.local/state/nvim/log/pi-bridge.nvim.log
+
+Set log_level = "debug" for connection troubleshooting.
+
+==============================================================================
+ vim:tw=78:ts=8:ft=help:norl:
