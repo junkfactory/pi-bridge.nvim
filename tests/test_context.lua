@@ -116,4 +116,67 @@ T["context"]["get includes filetype"] = function()
 	expect.equality(result.filetype, "lua")
 end
 
+T["context"]["get returns buffer_state saved for readable file"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.api.nvim_buf_set_name(0, '/tmp/pi_bridge_test_saved.lua')
+		vim.cmd('write! /tmp/pi_bridge_test_saved.lua')
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.context').get('normal')
+	]])
+	expect.equality(result.buffer_state, "saved")
+	-- cleanup
+	vim.fn.delete('/tmp/pi_bridge_test_saved.lua')
+end
+
+T["context"]["get returns buffer_state nameless for empty name"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.api.nvim_buf_set_name(0, '')
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.context').get('normal')
+	]])
+	expect.equality(result.buffer_state, "nameless")
+end
+
+T["context"]["get returns buffer_state scratch for scratch path"] = function()
+	child.lua([[
+		local data_dir = vim.fn.stdpath('data')
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.api.nvim_buf_set_name(0, data_dir .. '/scratch/test-123.lua')
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.context').get('normal')
+	]])
+	expect.equality(result.buffer_state, "scratch")
+end
+
+T["context"]["get returns buffer_state unsaved for named but unreadable"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.api.nvim_buf_set_name(0, '/tmp/pi_bridge_test_unsaved_nonexistent.lua')
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.context').get('normal')
+	]])
+	expect.equality(result.buffer_state, "unsaved")
+end
+
+T["context"]["get returns buffer_state modified for modified buffer"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'line' })
+		vim.api.nvim_buf_set_name(0, '/tmp/pi_bridge_test_modified.lua')
+		vim.cmd('write! /tmp/pi_bridge_test_modified.lua')
+		vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'extra line' })
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.context').get('normal')
+	]])
+	expect.equality(result.buffer_state, "modified")
+	-- cleanup
+	vim.fn.delete('/tmp/pi_bridge_test_modified.lua')
+end
+
 return T

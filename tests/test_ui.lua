@@ -56,8 +56,7 @@ T["ui"]["on_agent_start shows notification"] = function()
 	]])
 	local notifs = child.lua("return _G.notifications")
 	expect.equality(#notifs, 1)
-	expect.equality(notifs[1].msg:find("thinking%.%.%.") ~= nil, true)
-	expect.equality(notifs[1].msg:find("▸") ~= nil, true)
+	expect.equality(notifs[1].msg, "𝜋 thinking...")
 end
 
 T["ui"]["on_agent_start uses default message when empty"] = function()
@@ -83,8 +82,7 @@ T["ui"]["on_agent_end shows notification"] = function()
 	]])
 	local notifs = child.lua("return _G.notifications")
 	expect.equality(#notifs, 1)
-	expect.equality(notifs[1].msg:find("completed") ~= nil, true)
-	expect.equality(notifs[1].msg:find("▪") ~= nil, true)
+	expect.equality(notifs[1].msg, "𝜋 completed")
 end
 
 T["ui"]["on_agent_end uses default message when empty"] = function()
@@ -115,8 +113,7 @@ T["ui"]["on_agent_end runs checktime after notification"] = function()
 	local calls = child.lua("return _G.cmd_calls")
 	local notifs = child.lua("return _G.notifications")
 	expect.equality(#notifs, 1)
-	expect.equality(notifs[1].msg:find("done") ~= nil, true)
-	expect.equality(notifs[1].msg:find("▪") ~= nil, true)
+	expect.equality(notifs[1].msg, "𝜋 done")
 	expect.equality(calls[1], 'checktime')
 end
 

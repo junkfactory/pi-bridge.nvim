@@ -29,18 +29,37 @@ function M.get_visual_selection()
 	return lines, start_line, end_line
 end
 
+local function detect_buffer_state(name)
+	if name == "" then
+		return "nameless"
+	end
+	local data_dir = vim.fn.stdpath("data")
+	if name:find(data_dir .. "/scratch/", 1, true) then
+		return "scratch"
+	end
+	if vim.fn.filereadable(name) == 0 then
+		return "unsaved"
+	end
+	if vim.bo.modified then
+		return "modified"
+	end
+	return "saved"
+end
+
 function M.get(mode)
 	mode = mode or "normal"
 
 	local file = vim.api.nvim_buf_get_name(0)
 	local cwd = vim.fn.getcwd()
 	local filetype = vim.bo.filetype
+	local buffer_state = detect_buffer_state(file)
 
 	return {
 		file = file,
 		cwd = cwd,
 		mode = mode,
 		filetype = filetype,
+		buffer_state = buffer_state,
 	}
 end
 
