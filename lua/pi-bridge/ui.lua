@@ -9,14 +9,14 @@ end
 
 function M.on_agent_start(msg)
 	local detail = msg.message or "working..."
-	log.info("agent_start: " .. detail)
-	M.notify("▸ " .. detail, vim.log.levels.INFO)
+	log.info(msg.type .. ": " .. detail)
+	M.notify(detail, vim.log.levels.INFO)
 end
 
 function M.on_agent_end(msg)
 	local detail = msg.message or "done"
-	log.info("agent_end: " .. detail)
-	M.notify("▪ " .. detail, vim.log.levels.INFO)
+	log.info(msg.type .. ": " .. detail)
+	M.notify(detail, vim.log.levels.INFO)
 	vim.schedule(function()
 		pcall(function() vim.cmd("checktime") end)
 	end)
