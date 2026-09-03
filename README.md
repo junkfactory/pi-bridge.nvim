@@ -1,17 +1,19 @@
 # pi-bridge.nvim
 
-Neovim plugin for [pi](https://github.com/earendil-works/pi-coding-agent) integration via Unix socket. Pairs with [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext).
+Talk to [pi](https://github.com/earendil-works/pi-coding-agent) from Neovim. Hit `<leader>ai`, type your question with [placeholders](#placeholders) like `@this` or `@selection` to include code context — pi streams its response in the TUI.
 
-## Architecture
+No copy-pasting. No context switching. Just ask.
 
-```text
-┌─────────────┐     Unix Socket     ┌─────────────────┐
-│  pi (TUI)   │◄──────────────────► │ pi-bridge.nvim  │
-│  + extension│     JSON msgs       │ (Lua)           │
-└─────────────┘                     └─────────────────┘
+```vim
+:PiBridge fix @this              " send current line
+:PiBridge explain @selection     " send visual selection
+:PiBridge fix these @diagnostics " send LSP errors
+:PiBridge review @buffer         " send entire file
 ```
 
-Send prompts with buffer/selection context to pi directly from Neovim. Responses render in pi's TUI — no custom chat buffer needed.
+pi auto-launches in a split if it's not running. Buffers auto-refresh from disk when the agent finishes. Works per-project — each directory gets its own pi instance.
+
+Pairs with [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) (the pi extension that receives messages).
 
 ## Install
 
@@ -70,10 +72,10 @@ Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re
 
 ## Usage
 
-| Mode   | Mapping      | Action                                                                                                 |
-|--------|--------------|--------------------------------------------------------------------------------------------------------|
-| Normal | `<leader>ai` | Send prompt (use `@this`, `@selection`, `@buffer`, `@buffers`, `@content`, `@diagnostics` for context) |
-| Visual | `<leader>ai` | Send prompt + selection as context                                                                     |
+| Mode   | Mapping      | Action                               |
+|--------|--------------|--------------------------------------|
+| Normal | `<leader>ai` | Prompt for a message                 |
+| Visual | `<leader>ai` | Prompt with selection as context     |
 
 Or use the command:
 
@@ -84,7 +86,7 @@ Or use the command:
 
 All responses render in pi's TUI — streaming text, tool calls, diffs, etc.
 
-## Placeholders
+### Placeholders
 
 Include context directly in your message using placeholders:
 
@@ -154,6 +156,13 @@ keymaps = false,
 ```
 
 ## How It Works
+
+```text
+┌─────────────┐     Unix Socket     ┌─────────────────┐
+│  pi (TUI)   │◄──────────────────► │ pi-bridge.nvim  │
+│  + extension│     JSON msgs       │ (Lua)           │
+└─────────────┘                     └─────────────────┘
+```
 
 ### Socket Discovery
 
@@ -237,3 +246,4 @@ Requires Neovim 0.10+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) 
 ## Related
 
 - [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) — Pi extension side
+- Inspired by [opencode.nvim](https://github.com/nickjvandyke/opencode.nvim).

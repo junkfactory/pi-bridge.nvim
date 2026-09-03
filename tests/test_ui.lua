@@ -28,7 +28,7 @@ T["ui"]["notify sends prefixed message"] = function()
 	]])
 	local notifs = child.lua("return _G.notifications")
 	expect.equality(#notifs, 1)
-	expect.equality(notifs[1].msg, "pi-bridge: test message")
+	expect.equality(notifs[1].msg, "𝜋 test message")
 	expect.equality(notifs[1].level, vim.log.levels.INFO)
 end
 
@@ -42,7 +42,7 @@ T["ui"]["notify respects custom level"] = function()
 	]])
 	local notifs = child.lua("return _G.notifications")
 	expect.equality(#notifs, 1)
-	expect.equality(notifs[1].msg, "pi-bridge: warn msg")
+	expect.equality(notifs[1].msg, "𝜋 warn msg")
 	expect.equality(notifs[1].level, vim.log.levels.WARN)
 end
 
@@ -100,48 +100,60 @@ T["ui"]["on_agent_end uses default message when empty"] = function()
 	expect.equality(notifs[1]:find("done") ~= nil, true)
 end
 
-T["ui"]["on_file_edited highlights buffer for matching file"] = function()
+T["ui"]["on_agent_end runs checktime after notification"] = function()
 	child.lua([[
-		-- create a buffer with a known name
-		local buf = vim.api.nvim_create_buf(true, false)
-		local test_file = vim.fn.tempname() .. '.lua'
-		vim.api.nvim_buf_set_name(buf, test_file)
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'line1', 'line2', 'line3' })
-
-		require('pi-bridge.ui').on_file_edited({ type = 'file_edited', file = test_file })
-
-		-- check extmarks exist
-		local ns = vim.api.nvim_create_namespace('pi-bridge')
-		local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
-		_G.mark_count = #marks
+		_G.cmd_calls = {}
+		vim.cmd = function(cmd)
+			table.insert(_G.cmd_calls, cmd)
+		end
+		_G.notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G.notifications, { msg = msg, level = level })
+		end
+		require('pi-bridge.ui').on_agent_end({ type = 'agent_end', message = 'done' })
 	]])
-	local count = child.lua("return _G.mark_count")
-	expect.equality(count, 3)
+	local calls = child.lua("return _G.cmd_calls")
+	local notifs = child.lua("return _G.notifications")
+	expect.equality(#notifs, 1)
+	expect.equality(notifs[1].msg:find("done") ~= nil, true)
+	expect.equality(notifs[1].msg:find("▪") ~= nil, true)
+	expect.equality(calls[1], 'checktime')
 end
 
-T["ui"]["on_file_edited does nothing for non-matching file"] = function()
-	child.lua([[
-		-- create a buffer with a different name
-		local buf = vim.api.nvim_create_buf(true, false)
-		local test_file = vim.fn.tempname() .. '.lua'
-		vim.api.nvim_buf_set_name(buf, test_file)
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'line1' })
+T["ui"]["on_agent_end checktime reloads buffer from disk"] = function()
+	local tmpfile = child.lua("return vim.fn.tempname()")
+	child.lua(string.format([[
+		local path = %q
+		_G._test_tmpfile = path
 
-		require('pi-bridge.ui').on_file_edited({ type = 'file_edited', file = '/tmp/nonexistent.lua' })
+		-- Write initial content
+		vim.fn.writefile({ 'line1', 'line2' }, path)
 
-		local ns = vim.api.nvim_create_namespace('pi-bridge')
-		local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
-		_G.mark_count = #marks
-	]])
-	local count = child.lua("return _G.mark_count")
-	expect.equality(count, 0)
-end
+		-- Load file into a buffer
+		vim.cmd('edit ' .. vim.fn.fnameescape(path))
+		local buf = vim.api.nvim_get_current_buf()
+		vim.bo[buf].modified = false
 
-T["ui"]["on_file_edited handles missing file field"] = function()
-	child.lua([[
-		-- should not error
-		require('pi-bridge.ui').on_file_edited({ type = 'file_edited' })
-	]])
+		-- Sleep to ensure different mtime (filesystem second resolution)
+		vim.uv.sleep(1100)
+
+		-- Write new content out-of-band
+		vim.fn.writefile({ 'line1', 'line2', 'line3' }, path)
+
+		require('pi-bridge.ui').on_agent_end({ type = 'agent_end', message = 'done' })
+	]], tmpfile))
+
+	-- Let scheduled checktime run
+	child.lua("vim.wait(500)")
+
+	local lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_get_current_buf(), 0, -1, false)")
+	expect.equality(#lines, 3)
+	expect.equality(lines[1], 'line1')
+	expect.equality(lines[2], 'line2')
+	expect.equality(lines[3], 'line3')
+
+	-- cleanup
+	child.lua("vim.fn.delete(_G._test_tmpfile)")
 end
 
 return T

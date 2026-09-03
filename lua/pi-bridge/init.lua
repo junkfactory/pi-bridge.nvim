@@ -69,7 +69,7 @@ local function ensure_connection(cb)
 	-- spurious message when they quit Neovim normally.
 	local on_disconnect = function()
 		vim.notify(
-			"pi-bridge: pi session disconnected; launch pi to reconnect",
+			"𝜋 pi session disconnected; launch pi to reconnect",
 			vim.log.levels.WARN
 		)
 		log.info("remote disconnect from pi session")
@@ -87,7 +87,7 @@ local function ensure_connection(cb)
 
 		if not config.auto_launch then
 			vim.notify(
-				"pi-bridge: no active pi instance found. Launch pi manually in this project or a parent directory.",
+				"𝜋 no active pi instance found. Launch pi manually in this project or a parent directory.",
 				vim.log.levels.ERROR
 			)
 			cb(false)
@@ -109,7 +109,7 @@ local function ensure_connection(cb)
 			else
 				log.warn("still cannot connect after launch")
 				vim.notify(
-					"pi-bridge: launched pi but socket still unreachable",
+					"𝜋 launched pi but socket still unreachable",
 					vim.log.levels.ERROR
 				)
 				cb(false)
@@ -165,7 +165,7 @@ function M.setup(opts)
 
 	local err = validate_config(cfg)
 	if err then
-		error("pi-bridge: " .. err)
+		error("𝜋 " .. err)
 	end
 
 	config = cfg
@@ -178,7 +178,7 @@ function M.setup(opts)
 
 	if vim.o.autochdir then
 		vim.notify(
-			"pi-bridge: autochdir is not supported. Socket matching uses cwd, which autochdir changes per-file. "
+			"𝜋 autochdir is not supported. Socket matching uses cwd, which autochdir changes per-file. "
 				.. "Disable autochdir or use :lcd/:cd for project-level switching.",
 			vim.log.levels.WARN
 		)
@@ -191,7 +191,6 @@ function M.setup(opts)
 
 	dispatch.register("agent_start", ui.on_agent_start)
 	dispatch.register("agent_end", ui.on_agent_end)
-	dispatch.register("file_edited", ui.on_file_edited)
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = vim.api.nvim_create_augroup("pi-bridge", { clear = true }),
@@ -205,7 +204,7 @@ end
 
 function M.prompt(opts)
 	if not config then
-		vim.notify("pi-bridge: setup() not called", vim.log.levels.ERROR)
+		vim.notify("𝜋 setup() not called", vim.log.levels.ERROR)
 		return
 	end
 	opts = opts or {}
@@ -224,7 +223,7 @@ function M.prompt(opts)
 		local ok_ctx, ctx = pcall(context.get, mode)
 		if not ok_ctx then
 			log.error("failed to gather context: " .. tostring(ctx))
-			vim.notify("pi-bridge: failed to gather context", vim.log.levels.ERROR)
+			vim.notify("𝜋 failed to gather context", vim.log.levels.ERROR)
 			return
 		end
 
@@ -232,7 +231,7 @@ function M.prompt(opts)
 
 		ensure_connection(function(ok)
 			if not ok then
-				vim.notify("pi-bridge: not connected. Is pi running?", vim.log.levels.ERROR)
+				vim.notify("𝜋 not connected. Is pi running?", vim.log.levels.ERROR)
 				return
 			end
 
@@ -243,7 +242,7 @@ function M.prompt(opts)
 			})
 			if not ok_send then
 				log.error("failed to send message: " .. tostring(send_err))
-				vim.notify("pi-bridge: failed to send message", vim.log.levels.ERROR)
+				vim.notify("𝜋 failed to send message", vim.log.levels.ERROR)
 			end
 		end)
 	end
