@@ -24,6 +24,10 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 ```lua
 {
   "junkfactory/pi-bridge.nvim",
+  cmd = "PiBridge",
+  keys = {
+    { "<leader>ai", mode = { "n", "v" }, desc = "Ask pi" },
+  },
   opts = {
     -- see Setup section for all options
   },
