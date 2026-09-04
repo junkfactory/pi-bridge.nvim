@@ -47,10 +47,4 @@ if [ "$need_install" -eq 1 ]; then
     nvim --version | head -1
 fi
 
-# Test dependency: mini.nvim (gitignored, fetched once)
-if [ ! -d .deps/mini.nvim ]; then
-    echo "fetching mini.nvim test dependency"
-    git clone --depth 1 https://github.com/echasnovski/mini.nvim .deps/mini.nvim
-fi
-
 make test

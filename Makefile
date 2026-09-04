@@ -2,6 +2,7 @@
 
 # Run all tests
 test:
+	@test -d .deps/mini.nvim || git clone --depth 1 https://github.com/echasnovski/mini.nvim .deps/mini.nvim
 	nvim --headless --noplugin -u scripts/minimal_init.lua \
 		-c "lua MiniTest.run({ execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth = 1 }) } })"
 
