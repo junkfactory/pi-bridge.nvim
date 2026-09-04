@@ -24,6 +24,7 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 ```lua
 {
   "junkfactory/pi-bridge.nvim",
+  version = "*",  -- pin to the latest tagged release
   cmd = "PiBridge",
   keys = {
     { "<leader>ai", mode = { "n", "v" }, desc = "Ask pi" },
@@ -73,6 +74,12 @@ ln -s /absolute/path/to/pi-bridge.nvim \
 ```
 
 Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re-scans the runtimepath. The symlink stays in sync with your working tree automatically.
+
+## Releases
+
+Each repo ([pi-bridge.nvim](https://github.com/junkfactory/pi-bridge.nvim/releases), [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext/releases)) is released independently. The only exception is a **socket protocol change**: both repos are then tagged together at the same version, and a pairing line is added to both release notes.
+
+Notes are generated from conventional commits. On the plugin side, prefer `version = "*"` while pre-1.0 — semver guarantees are soft before 1.0, so tracking the latest tag is safer than pinning.
 
 ## Usage
 
@@ -245,7 +252,7 @@ make test-resolve          # socket resolver only
 make test-health           # :checkhealth only
 ```
 
-Requires Neovim 0.10+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
+Requires Neovim 0.12+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
 
 ## Related
 
