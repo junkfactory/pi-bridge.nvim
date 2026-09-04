@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# CI build/test entry point. Usage: build.sh [nvim-version]
+# NVIM_VERSION defaults to "stable". Installs the requested Neovim
+# (linux x86_64 tarball) if the local nvim doesn't satisfy the request,
+# then runs the test suite.
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+NVIM_VERSION="${1:-${NVIM_VERSION:-stable}}"
+
+need_install=0
+if command -v nvim >/dev/null 2>&1; then
+    installed="$(nvim --version | head -1 | awk '{print $NF}')"
+    if [ "$NVIM_VERSION" = "stable" ] || [ "$installed" = "v$NVIM_VERSION" ]; then
+        echo "using installed nvim $installed"
+    else
+        need_install=1
+    fi
+else
+    need_install=1
+fi
+
+if [ "$need_install" -eq 1 ]; then
+    echo "installing nvim $NVIM_VERSION"
+    # stable → resolve the actual latest tag via the GitHub releases redirect
+    if [ "$NVIM_VERSION" = "stable" ]; then
+        NVIM_VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            https://github.com/neovim/neovim/releases/latest | sed 's#.*/tag/##')"
+    fi
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
+        -o /tmp/nvim.tar.gz
+    mkdir -p /tmp/nvim-ci
+    tar -xzf /tmp/nvim.tar.gz -C /tmp/nvim-ci --strip-components=1
+    export PATH="/tmp/nvim-ci/bin:$PATH"
+    nvim --version | head -1
+fi
+
+make test
