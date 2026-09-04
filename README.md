@@ -21,10 +21,12 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 
 ### lazy.nvim
 
+Pin to releases (recommended):
+
 ```lua
 {
   "junkfactory/pi-bridge.nvim",
-  version = "*",  -- pin to the latest tagged release
+  version = "*",  -- latest tagged release
   cmd = "PiBridge",
   keys = {
     { "<leader>ai", mode = { "n", "v" }, desc = "Ask pi" },
@@ -35,9 +37,33 @@ Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) installed
 }
 ```
 
+Or track main (may encounter instability):
+
+```lua
+{
+  "junkfactory/pi-bridge.nvim",
+  -- no version key; tracks main
+  cmd = "PiBridge",
+  keys = {
+    { "<leader>ai", mode = { "n", "v" }, desc = "Ask pi" },
+  },
+  opts = {},
+}
+```
+
 lazy.nvim automatically calls `require("pi-bridge").setup(opts)` — no `config = function()` needed.
 
 ### Native packages
+
+Pin to a release (recommended):
+
+```bash
+mkdir -p ~/.local/share/nvim/site/pack/plugins/start
+git clone --branch v0.1.0 --depth 1 https://github.com/junkfactory/pi-bridge.nvim.git \
+  ~/.local/share/nvim/site/pack/plugins/start/pi-bridge.nvim
+```
+
+Or track main (may encounter instability):
 
 ```bash
 mkdir -p ~/.local/share/nvim/site/pack/plugins/start
