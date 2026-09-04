@@ -23,10 +23,19 @@ fi
 
 if [ "$need_install" -eq 1 ]; then
     echo "installing nvim $NVIM_VERSION"
-    # stable → resolve the actual latest tag via the GitHub releases redirect
+    # Resolve the release tag: stable → latest via the GitHub releases redirect;
+    # MAJOR.MINOR (e.g. 0.12) → highest matching v$MAJOR.$MINOR.* tag.
     if [ "$NVIM_VERSION" = "stable" ]; then
         NVIM_VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
             https://github.com/neovim/neovim/releases/latest | sed 's#.*/tag/##')"
+    elif [ "$(printf %s "$NVIM_VERSION" | tr -cd . | wc -c)" -eq 1 ]; then  # MAJOR.MINOR
+        NVIM_VERSION="$(git ls-remote --tags --refs https://github.com/neovim/neovim \
+            "v${NVIM_VERSION}.*" | awk -F/ '{print $NF}' | sort -V | tail -1 | sed 's/^v//')"
+        if [ -z "$NVIM_VERSION" ]; then
+            echo "no nvim release found for the requested series" >&2
+            exit 1
+        fi
+        echo "resolved to nvim $NVIM_VERSION"
     fi
     curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
         -o /tmp/nvim.tar.gz
