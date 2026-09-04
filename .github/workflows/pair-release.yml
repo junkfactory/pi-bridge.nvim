@@ -1,0 +1,42 @@
+name: pair-release
+on:
+  schedule:
+    - cron: '0 12 * * *'  # 4am America/Los_Angeles (PST=UTC-8, PDT=UTC-7)
+  workflow_dispatch:
+jobs:
+  pair:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Append pairing line
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get ext's latest release tag
+          OTHER_TAG=$(gh release view --repo junkfactory/pi-bridge.ext --json tagName -q .tagName 2>/dev/null) || {
+            echo "No release found in pi-bridge.ext; skipping"
+            exit 0
+          }
+
+          # Get nvim's latest release
+          OWN_TAG=$(gh release view --repo junkfactory/pi-bridge.nvim --json tagName -q .tagName 2>/dev/null) || {
+            echo "No release found in pi-bridge.nvim; skipping"
+            exit 0
+          }
+
+          # Get current release notes
+          NOTES=$(gh release view "$OWN_TAG" --repo junkfactory/pi-bridge.nvim --json body -q .body)
+
+          # Check if pairing line already exists
+          if echo "$NOTES" | grep -qF "Requires pi-bridge.ext"; then
+            echo "Pairing line already exists; nothing to do"
+            exit 0
+          fi
+
+          # Append and update
+          UPDATED="${NOTES}
+
+          - Requires pi-bridge.ext ${OTHER_TAG}"
+          gh release edit "$OWN_TAG" --repo junkfactory/pi-bridge.nvim --notes "$UPDATED"
+          echo "Added: - Requires pi-bridge.ext ${OTHER_TAG}"
