@@ -29,7 +29,7 @@ jobs:
           NOTES=$(gh release view "$OWN_TAG" --repo junkfactory/pi-bridge.nvim --json body -q .body)
 
           # Check if pairing line already exists
-          if echo "$NOTES" | grep -qF "Requires \[pi-bridge.ext\]"; then
+          if echo "$NOTES" | grep -qF "Requires [pi-bridge.ext]"; then
             echo "Pairing line already exists; nothing to do"
             exit 0
           fi
