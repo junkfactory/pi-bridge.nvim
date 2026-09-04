@@ -252,7 +252,7 @@ make test-resolve          # socket resolver only
 make test-health           # :checkhealth only
 ```
 
-Requires Neovim 0.12+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
+Requires Neovim 0.12.5+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).
 
 ## Related
 
