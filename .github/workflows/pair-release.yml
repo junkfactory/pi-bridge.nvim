@@ -29,7 +29,7 @@ jobs:
           NOTES=$(gh release view "$OWN_TAG" --repo junkfactory/pi-bridge.nvim --json body -q .body)
 
           # Check if pairing line already exists
-          if echo "$NOTES" | grep -qF "Requires pi-bridge.ext"; then
+          if echo "$NOTES" | grep -qF "Requires \[pi-bridge.ext\]"; then
             echo "Pairing line already exists; nothing to do"
             exit 0
           fi
@@ -37,6 +37,6 @@ jobs:
           # Append and update
           UPDATED="${NOTES}
 
-          - Requires pi-bridge.ext ${OTHER_TAG}"
+          - Requires [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext) ${OTHER_TAG}"
           gh release edit "$OWN_TAG" --repo junkfactory/pi-bridge.nvim --notes "$UPDATED"
-          echo "Added: - Requires pi-bridge.ext ${OTHER_TAG}"
+          echo "Added: - Requires [pi-bridge.ext](...) ${OTHER_TAG}"
