@@ -146,7 +146,7 @@ local function resolve_content()
 	-- room for the truncation notice itself.
 	local kept = {}
 	local kept_bytes = 0
-	for i, line in ipairs(lines) do
+	for _, line in ipairs(lines) do
 		-- +1 accounts for the joining newline between lines
 		local line_bytes = #line + 1
 		if kept_bytes + line_bytes > CONTENT_BYTE_LIMIT then
