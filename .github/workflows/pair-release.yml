@@ -1,7 +1,7 @@
 name: pair-release
 on:
   schedule:
-    - cron: '0 12 * * *'  # 4am America/Los_Angeles (PST=UTC-8, PDT=UTC-7)
+    - cron: '23 11 * * *'  # ~4:23am America/Los_Angeles (PST=UTC-8, PDT=UTC-7); off-the-hour to avoid GH scheduling delays
   workflow_dispatch:
 jobs:
   pair:
