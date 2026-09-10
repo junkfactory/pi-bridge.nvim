@@ -101,11 +101,33 @@ ln -s /absolute/path/to/pi-bridge.nvim \
 
 Restart nvim after editing files under `lua/`, `plugin/`, or `doc/` so Neovim re-scans the runtimepath. The symlink stays in sync with your working tree automatically.
 
-## Releases
+## Releasing
 
-Each repo ([pi-bridge.nvim](https://github.com/junkfactory/pi-bridge.nvim/releases), [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext/releases)) is released independently. The only exception is a **socket protocol change**: both repos are then tagged together at the same version, and a pairing line is added to both release notes.
+Each repo ([pi-bridge.nvim](https://github.com/junkfactory/pi-bridge.nvim/releases), [pi-bridge.ext](https://github.com/junkfactory/pi-bridge.ext/releases)) is released independently. The exception is a **socket protocol change** — both repos are then tagged at the same version.
 
-Notes are generated from conventional commits. On the plugin side, prefer `version = "*"` while pre-1.0 — semver guarantees are soft before 1.0, so tracking the latest tag is safer than pinning.
+Releases are triggered by tagging. The `tag.sh` script handles validation, build checks, tagging, and pushing:
+
+```bash
+./.github/ci/tag.sh 0.1.2   # no 'v' prefix — script adds it
+```
+
+This runs the full test suite (`make test`), creates a `v0.1.2` jj tag on main, and pushes. The push triggers a CI job that creates the GitHub release with auto-generated notes.
+
+### Cross-repo pairing
+
+After both releases exist, a daily CI job appends a pairing line (e.g. "Requires pi-bridge.ext v0.1.2") to each release's notes.
+
+### Dry run
+
+```bash
+DRY_RUN=1 ./.github/ci/tag.sh 0.1.2
+```
+
+Runs checks and prints the tag/push commands without mutating anything.
+
+### Version pinning
+
+Prefer `version = "*"` while pre-1.0 — semver guarantees are soft before 1.0, so tracking the latest tag is safer than pinning.
 
 ## Usage
 
