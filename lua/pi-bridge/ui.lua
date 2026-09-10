@@ -4,7 +4,9 @@ local M = {}
 
 function M.notify(msg, level)
 	level = level or vim.log.levels.INFO
-	vim.notify("𝜋 " .. msg, level)
+	vim.schedule(function()
+		vim.notify("𝜋 " .. msg, level)
+	end)
 end
 
 function M.on_agent_start(msg)
@@ -19,6 +21,14 @@ function M.on_agent_end(msg)
 	M.notify(detail, vim.log.levels.INFO)
 	vim.schedule(function()
 		pcall(function() vim.cmd("checktime") end)
+	end)
+end
+
+function M.on_error(msg)
+	local detail = msg.message or "delivery error"
+	log.error("error event: " .. (msg.code or "unknown") .. ": " .. detail)
+	vim.schedule(function()
+		vim.notify("𝜋 " .. detail, vim.log.levels.ERROR)
 	end)
 end
 
