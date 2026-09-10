@@ -153,4 +153,32 @@ T["ui"]["on_agent_end checktime reloads buffer from disk"] = function()
 	child.lua("vim.fn.delete(_G._test_tmpfile)")
 end
 
+T["ui"]["on_error shows notification with ERROR level"] = function()
+	child.lua([[
+		_G.notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G.notifications, { msg = msg, level = level })
+		end
+		require('pi-bridge.ui').on_error({ message = 'Failed to deliver message to pi', code = 'stale_context' })
+	]])
+	local notifs = child.lua("return _G.notifications")
+	expect.equality(#notifs, 1)
+	expect.equality(notifs[1].msg, "𝜋 Failed to deliver message to pi")
+	expect.equality(notifs[1].level, vim.log.levels.ERROR)
+end
+
+T["ui"]["on_error uses default message when empty"] = function()
+	child.lua([[
+		_G.notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G.notifications, { msg = msg, level = level })
+		end
+		require('pi-bridge.ui').on_error({})
+	]])
+	local notifs = child.lua("return _G.notifications")
+	expect.equality(#notifs, 1)
+	expect.equality(notifs[1].msg, "𝜋 delivery error")
+	expect.equality(notifs[1].level, vim.log.levels.ERROR)
+end
+
 return T

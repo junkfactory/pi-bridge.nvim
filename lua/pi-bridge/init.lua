@@ -68,10 +68,12 @@ local function ensure_connection(cb)
 	-- Suppressed during local VimLeavePre cleanup so users do not see a
 	-- spurious message when they quit Neovim normally.
 	local on_disconnect = function()
-		vim.notify(
-			"𝜋 pi session disconnected; launch pi to reconnect",
-			vim.log.levels.WARN
-		)
+		vim.schedule(function()
+			vim.notify(
+				"𝜋 pi session disconnected; launch pi to reconnect",
+				vim.log.levels.WARN
+			)
+		end)
 		log.info("remote disconnect from pi session")
 	end
 
@@ -191,6 +193,7 @@ function M.setup(opts)
 
 	dispatch.register("agent_start", ui.on_agent_start)
 	dispatch.register("agent_end", ui.on_agent_end)
+	dispatch.register("error", ui.on_error)
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = vim.api.nvim_create_augroup("pi-bridge", { clear = true }),
