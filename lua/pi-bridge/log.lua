@@ -12,6 +12,7 @@ local LEVEL_NAMES = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
 
 local log_path = nil
 local level_threshold = LEVELS.info
+local pid = tostring(vim.fn.getpid())
 
 local function timestamp()
 	return os.date("%Y-%m-%d %H:%M:%S")
@@ -40,7 +41,7 @@ function M.log(level, msg)
 	if LEVELS[level] < level_threshold then return end
 
 	local idx = LEVELS[level] + 1
-	local line = string.format("[%s] [%s] %s", timestamp(), LEVEL_NAMES[idx], msg)
+	local line = string.format("[%s] [%-5s] [pid:%s] %s", timestamp(), LEVEL_NAMES[idx], pid, msg)
 	write_line(line)
 end
 
