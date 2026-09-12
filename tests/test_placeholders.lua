@@ -85,6 +85,147 @@ T["placeholders"]["resolve replaces @selection with full lines while linewise vi
 	expect.equality(result, "bbb\nccc")
 end
 
+T["placeholders"]["resolve replaces @selection with block columns while blockwise visual is active"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'world', 'funky', 'zzzz' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 2 })
+	]])
+	expect.equality(child.fn.mode(), "\22")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	-- Lines 2-3, columns 1-3: "fun" (from "funky") and "zzz" (from "zzzz").
+	expect.equality(result, "fun\nzzz")
+end
+
+T["placeholders"]["resolve replaces @selection with block columns after blockwise visual"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'world', 'funky', 'zzzz' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 2 })
+		vim.cmd('normal! \27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "fun\nzzz")
+end
+
+T["placeholders"]["resolve block selection skips lines shorter than the block"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'abcdefghij', 'x', 'abcdefghij' })
+		vim.api.nvim_win_set_cursor(0, { 1, 2 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 4 })
+		vim.cmd('normal! \27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	-- Columns 3-5 on lines 1 and 3; "x" is too short and is dropped.
+	expect.equality(result, "cde\ncde")
+end
+
+T["placeholders"]["resolve block selection normalizes right-to-left drag"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'world', 'funky', 'zzzz' })
+		vim.api.nvim_win_set_cursor(0, { 3, 3 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	-- Corners (3,4) and (2,1): lines 2-3, columns 1-4 -> "funk" (from
+	-- "funky") and "zzzz"; line 1 "world" is outside the block.
+	expect.equality(result, "funk\nzzzz")
+end
+
+T["placeholders"]["resolve block selection over box-drawing chars keeps whole chars"] = function()
+	-- ┌ ─ │ are 3 bytes each in UTF-8 but one screen col wide. A block
+	-- over them must slice by virtcol, not bytecol — the old code would
+	-- extract only 2 chars per line and/or produce invalid UTF-8 when the
+	-- byte col landed inside a 3-byte char.
+	-- Block from (line 2, col 0) to (line 3, byte col 5): line 3's
+	-- 4th char `i` sits at byte col 5 (0-indexed), giving end_vcol=4.
+	-- Yields screen cols 1-4: line 2's first 4 chars ┌───, line 3's
+	-- first 4 chars │ pi.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { '```text', '┌──────────────┐', '│ pi (TUI)', '```' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 5 })
+	]])
+	expect.equality(child.fn.mode(), "\22")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "┌───\n│ pi")
+end
+
+T["placeholders"]["resolve block selection after exit covers box-drawing chars"] = function()
+	-- Same shape as the active test above, but Esc is pressed before
+	-- resolve so '< and '> marks drive the read. Virtcol conversion must
+	-- apply to the marks path too.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { '```text', '┌──────────────┐', '│ pi (TUI)', '```' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 5 })
+		vim.cmd('normal! \27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "┌───\n│ pi")
+end
+
+T["placeholders"]["resolve block selection includes whole multibyte char at right edge"] = function()
+	-- Single-line block whose right edge lands ON the closing │ (a 3-byte
+	-- UTF-8 char). The bytecol on │'s first byte would slice the char
+	-- in half if used directly with string.sub — virtcol conversion +
+	-- whole-char walk must keep the closing │ intact.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { '│ pi (TUI)     │' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! \22')
+		-- Byte col 17 = first byte of the closing │ (5 spaces between
+		-- ')' and '│' push its start to byte 18 in 1-indexed = 17 in
+		-- 0-indexed). virtcol there is 16.
+		vim.api.nvim_win_set_cursor(0, { 1, 17 })
+	]])
+	expect.equality(child.fn.mode(), "\22")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	-- Whole line, closing │ included (no mid-char truncation).
+	expect.equality(result, "│ pi (TUI)     │")
+end
+
+T["placeholders"]["resolve block selection handles wide CJK chars at edge"] = function()
+	-- 日 / 本 / 語 are displaywidth 2 each. Block cols 1-3 must include
+	-- 本 (starts at virtcol 3, equals end_vcol) whole — not be cut off
+	-- at col 2 where 日 ends.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { '日本語 テスト' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! \22')
+		-- Byte col 3 (0-indexed) = first byte of 本; virtcol there is 3.
+		vim.api.nvim_win_set_cursor(0, { 1, 3 })
+	]])
+	expect.equality(child.fn.mode(), "\22")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "日本")
+end
+
+T["placeholders"]["resolve charwise selection over multibyte keeps whole chars"] = function()
+	-- Charwise v from char 1 to char 3 of 日本語テスト. The '.' mark's
+	-- bytecol sits on 語's first byte; converting to charcol gives 3,
+	-- and strcharpart slices by whole chars — producing 日本語, not a
+	-- half-byte prefix.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { '日本語テスト' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! v')
+		-- 0-indexed byte col 6 = 語's first byte; charwise selects
+		-- chars 1-3.
+		vim.api.nvim_win_set_cursor(0, { 1, 6 })
+	]])
+	expect.equality(child.fn.mode(), "v")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "日本語")
+end
+
 T["placeholders"]["resolve replaces @selection with full lines after linewise visual"] = function()
 	-- Exited linewise visual: '< and '> marks must not column-trim lines.
 	child.lua([[
@@ -92,7 +233,7 @@ T["placeholders"]["resolve replaces @selection with full lines after linewise vi
 		vim.api.nvim_win_set_cursor(0, { 2, 0 })
 		vim.cmd('normal! V')
 		vim.api.nvim_win_set_cursor(0, { 3, 0 })
-		vim.cmd('normal! \\27')
+		vim.cmd('normal! \27')
 	]])
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
 	expect.equality(result, "bbb\nccc")
