@@ -9,7 +9,7 @@ REPORTER = { execute = { reporter = MiniTest.gen_reporter.stdout({ group_depth =
 TEST_STATE = $(CURDIR)/.deps/test-state
 export XDG_STATE_HOME := $(TEST_STATE)
 
-.PHONY: test test_file test-log test-context test-socket test-init test-launch test-placeholders test-dispatch test-ui test-health test-resolve
+.PHONY: test test_file test-log test-context test-socket test-init test-launch test-placeholders test-dispatch test-ui test-health test-resolve test-approval
 
 # Ensure test dependency is present
 .deps/mini.nvim:
@@ -57,3 +57,6 @@ test-placeholders: .deps/mini.nvim
 
 test-resolve: .deps/mini.nvim
 	$(NVIM) --headless --noplugin -u $(INIT) -c "lua MiniTest.run_file('tests/test_resolve.lua', $(REPORTER))"
+
+test-approval: .deps/mini.nvim
+	$(NVIM) --headless --noplugin -u $(INIT) -c "lua MiniTest.run_file('tests/test_approval.lua', $(REPORTER))"

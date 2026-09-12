@@ -6,6 +6,7 @@ local dispatch = require("pi-bridge.dispatch")
 local ui = require("pi-bridge.ui")
 local placeholders = require("pi-bridge.placeholders")
 local resolve = require("pi-bridge.resolve")
+local approval = require("pi-bridge.approval")
 
 local M = {}
 
@@ -19,6 +20,11 @@ local defaults = {
 	launch_cmd = { "pi" },
 	keymaps = { prompt = "<leader>ai" },
 	log_level = "info",
+	-- When pi sends an approval_request, show a centered floating diff
+	-- prompt with y/a/n keys. Set to false to opt out (pi falls back to
+	-- its own TUI overlay after 1s because no ack arrives). Protocol is
+	-- always wired — this is the runtime opt-out, not a protocol switch.
+	edit_approval_prompt = true,
 }
 
 local function validate_config(cfg)
@@ -50,6 +56,9 @@ local function validate_config(cfg)
 		if cfg.keymaps.prompt ~= false and type(cfg.keymaps.prompt) ~= "string" then
 			return "keymaps.prompt must be a string or false"
 		end
+	end
+	if cfg.edit_approval_prompt ~= nil and type(cfg.edit_approval_prompt) ~= "boolean" then
+		return "edit_approval_prompt must be a boolean"
 	end
 	return nil
 end
@@ -194,6 +203,20 @@ function M.setup(opts)
 	dispatch.register("agent_start", ui.on_agent_start)
 	dispatch.register("agent_end", ui.on_agent_end)
 	dispatch.register("error", ui.on_error)
+
+	-- Edit approval gate: pi asks before applying edit/write tools.
+	-- We always wire these handlers; the module decides at runtime
+	-- whether to actually open the float based on edit_approval_prompt.
+	-- ack must be sent within 1s, so show() emits it right after the
+	-- window opens. approval_resolved is pi's signal that the float is
+	-- stale (e.g. its own fallback already answered).
+	approval.setup(config)
+	dispatch.register("approval_request", function(msg)
+		approval.show(msg, socket.send)
+	end)
+	dispatch.register("approval_resolved", function(msg)
+		approval.resolve(msg.id)
+	end)
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = vim.api.nvim_create_augroup("pi-bridge", { clear = true }),

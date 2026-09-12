@@ -293,4 +293,116 @@ T["init"]["local disconnect does not notify"] = function()
 	helpers.rmdir(dir)
 end
 
+-- Edit approval gate: setup wires approval_request and approval_resolved
+-- handlers; the default is on; the option can be opted out at setup time.
+
+T["init"]["setup registers approval_request handler"] = function()
+	local has_handler = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local dispatch = require('pi-bridge.dispatch')
+		local handlers = dispatch.get_handlers()
+		return type(handlers.approval_request) == 'function'
+	]])
+	expect.equality(has_handler, true)
+end
+
+T["init"]["setup registers approval_resolved handler"] = function()
+	local has_handler = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local dispatch = require('pi-bridge.dispatch')
+		local handlers = dispatch.get_handlers()
+		return type(handlers.approval_resolved) == 'function'
+	]])
+	expect.equality(has_handler, true)
+end
+
+T["init"]["edit_approval_prompt defaults to true"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.edit_approval_prompt, true)
+end
+
+T["init"]["edit_approval_prompt can be set to false"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', edit_approval_prompt = false })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.edit_approval_prompt, false)
+
+	local enabled = child.lua([[
+		return require('pi-bridge.approval').is_enabled()
+	]])
+	expect.equality(enabled, false)
+end
+
+T["init"]["setup rejects non-boolean edit_approval_prompt"] = function()
+	local ok = child.lua([[
+		local ok, err = pcall(require('pi-bridge').setup, { edit_approval_prompt = 'yes' })
+		return ok
+	]])
+	expect.equality(ok, false)
+end
+
+T["init"]["approval_request dispatched via registered handler opens a float"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		-- Stub socket.send to capture outbound.
+		_G.approval_sent = {}
+		local socket = require('pi-bridge.socket')
+		socket.send = function(msg) table.insert(_G.approval_sent, msg) end
+
+		local dispatch = require('pi-bridge.dispatch')
+		dispatch.dispatch({
+			type = 'approval_request',
+			id = 'init-wire',
+			tool = 'edit',
+			path = '/tmp/x.lua',
+			diff = '--- a\n+++ b\n-old\n+new\n',
+		})
+		local open = false
+		for _, w in ipairs(vim.api.nvim_list_wins()) do
+			local c = vim.api.nvim_win_get_config(w)
+			if c.relative and c.relative ~= '' then open = true break end
+		end
+		return { sent = _G.approval_sent, open = open }
+	]])
+	expect.equality(result.open, true)
+	local saw_ack = false
+	for _, m in ipairs(result.sent) do
+		if m.type == "approval_ack" and m.id == "init-wire" then
+			saw_ack = true
+			break
+		end
+	end
+	expect.equality(saw_ack, true)
+end
+
+T["init"]["approval_resolved closes float opened via dispatch"] = function()
+	child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local socket = require('pi-bridge.socket')
+		socket.send = function() end
+		local dispatch = require('pi-bridge.dispatch')
+		dispatch.dispatch({
+			type = 'approval_request',
+			id = 'init-resolve',
+			tool = 'edit',
+			path = '/tmp/x.lua',
+			diff = 'd\n',
+		})
+		dispatch.dispatch({ type = 'approval_resolved', id = 'init-resolve' })
+	]])
+	local open = child.lua([[
+		local open = false
+		for _, w in ipairs(vim.api.nvim_list_wins()) do
+			local c = vim.api.nvim_win_get_config(w)
+			if c.relative and c.relative ~= '' then open = true break end
+		end
+		return open
+	]])
+	expect.equality(open, false)
+end
+
 return T

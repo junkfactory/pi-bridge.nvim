@@ -11,9 +11,10 @@ CONTENTS                                                  *pi-bridge-contents*
 3. Commands                                                 |pi-bridge-commands|
 4. Config                                                     |pi-bridge-config|
 5. Events                                                   |pi-bridge-events|
-6. Healthcheck                                           |pi-bridge-healthcheck|
-7. Architecture                                           |pi-bridge-architecture|
-8. Troubleshooting                                     |pi-bridge-troubleshooting|
+6. Approval prompt                                   |pi-bridge-approval-prompt|
+7. Healthcheck                                           |pi-bridge-healthcheck|
+8. Architecture                                           |pi-bridge-architecture|
+9. Troubleshooting                                     |pi-bridge-troubleshooting|
 
 ==============================================================================
 1. Overview                                                 *pi-bridge-overview*
@@ -84,6 +85,7 @@ Default values:
       launch_cmd = { "pi" },
       keymaps = { prompt = "<leader>ai" },
       log_level = "info",
+      edit_approval_prompt = true,
     }
 <
 
@@ -117,6 +119,15 @@ keymaps ~
                                              *pi-bridge-config.log_level*
 log_level ~
   "trace", "debug", "info", "warn", or "error". Default "info".
+
+                                     *pi-bridge-config.edit_approval_prompt*
+edit_approval_prompt ~
+  true or false. Default true. When pi sends an `approval_request`
+  for an `edit`/`write` tool, Neovim shows a centered floating diff
+  window with `y` / `a` / `n` / `<Esc>` keys. Set to false to opt
+  out — pi falls back to its own TUI overlay because no
+  `approval_ack` arrives within 1s. The protocol itself is always
+  wired.
 
 ==============================================================================
 5. Events                                                   *pi-bridge-events*
@@ -153,7 +164,34 @@ Custom handlers: ~
     dispatch.register("new_type", ui.on_new_type)
 <
 ==============================================================================
-6. Healthcheck                                           *pi-bridge-healthcheck*
+6. Approval prompt                                   *pi-bridge-approval-prompt*
+
+When pi is about to apply its built-in `edit` or `write` tool, the
+extension sends an `approval_request` event over the socket. Neovim
+opens a centered floating window with the diff and waits for a key.
+
+Keys (buffer-local, work inside the float only):
+
+  `y`     Approve this single tool call (decision: "yes")
+  `a`     Approve all future edits to that file this session ("all")
+  `n`     Reject the tool call (decision: "no")
+  `<Esc>` Same as `n`
+
+An `approval_ack` is sent the moment the float opens, so pi stops its
+fallback timer. If no ack arrives within 1s (nvim not connected,
+opt-out, etc.) pi shows its own in-TUI overlay.
+
+The float shows a `[warning] buffer has unsaved changes; diff is
+computed from disk` line above the header when a buffer for the
+target file is loaded and `&modified`. The diff is always the disk
+content vs. the proposed change — what pi would apply.
+
+If pi resolves a request via its own fallback before the user keys,
+`approval_resolved` closes the stale float; late keypresses send a
+response pi discards harmlessly.
+
+==============================================================================
+7. Healthcheck                                           *pi-bridge-healthcheck*
 
                                                            *:checkhealth*
 :checkhealth pi-bridge    Run read-only diagnostics.
@@ -171,7 +209,7 @@ modifies state (except creating the socket directory if missing, which is
 harmless).
 
 ==============================================================================
-7. Architecture                                       *pi-bridge-architecture*
+8. Architecture                                       *pi-bridge-architecture*
 
 >text
     ┌─────────────┐     Unix Socket     ┌─────────────────┐
@@ -185,7 +223,7 @@ Socket path: ~/.pi/agent/pi-bridge/sockets/<sha256(cwd)>.sock
 One socket per project directory. SHA256 of the absolute cwd path.
 
 ==============================================================================
-8. Troubleshooting                                 *pi-bridge-troubleshooting*
+9. Troubleshooting                                 *pi-bridge-troubleshooting*
 
                                                   *pi-bridge-autochdir*
 autochdir ~

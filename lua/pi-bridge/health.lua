@@ -59,6 +59,22 @@ local function check_autochdir()
 	end
 end
 
+-- Edit approval prompt support
+--
+-- The approval module is always loaded by setup() (when init.lua is
+-- the entry point), but health may run before setup. Check via
+-- `package.loaded` so health works in either order; the protocol
+-- support is a property of the plugin code, not a runtime toggle.
+
+local function check_approval_prompt()
+	local ok, mod = pcall(require, "pi-bridge.approval")
+	if ok and type(mod.show) == "function" and type(mod.resolve) == "function" then
+		vim.health.ok("Edit approval prompt supported (y / a / n keys)")
+	else
+		vim.health.warn("Edit approval prompt module unavailable")
+	end
+end
+
 -- Probe a single socket path's availability, mirroring resolve.lua's
 -- internal probe but only exposing what health needs: file presence
 -- and whether the kernel accepts the connection. Health must never
@@ -184,6 +200,7 @@ function M.check()
 	check_socket_dir()
 	check_extension()
 	check_autochdir()
+	check_approval_prompt()
 	check_socket_status()
 	check_log_file()
 end

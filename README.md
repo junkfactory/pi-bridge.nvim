@@ -199,6 +199,12 @@ require("pi-bridge").setup({
 
   -- Log level: "trace" | "debug" | "info" | "warn" | "error"
   log_level = "info",
+
+  -- Edit approval prompt: when pi is about to edit/write a file,
+  -- show a centered diff in a floating window with y/a/n keys.
+  -- Set false to opt out (pi falls back to its own TUI overlay
+  -- because no approval_ack arrives within 1s).
+  edit_approval_prompt = true,
 })
 ```
 
@@ -280,6 +286,33 @@ Health distinguishes between "is there a server" and "is Neovim connected to it"
 
 `:checkhealth` only inspects state; it never opens or closes the persistent connection.
 
+## Edit Approval Prompt
+
+When pi is about to apply its `edit` or `write` tool, it sends an `approval_request` over the socket. pi-bridge.nvim shows the unified diff in a centered floating window with diff syntax highlighting and three keys:
+
+| Key     | Decision | Effect                                              |
+|---------|----------|-----------------------------------------------------|
+| `y`     | `yes`    | Approve this single tool call                       |
+| `a`     | `all`    | Approve all future edits to that file this session  |
+| `n`     | `no`     | Reject the tool call (pi narrates the rejection)    |
+| `<Esc>` | `no`     | Same as `n`                                         |
+
+An `approval_ack` is sent the moment the window opens so pi knows Neovim took over (its own fallback overlay appears only if no ack arrives within 1s).
+
+If the buffer for the target file is loaded and `&modified`, a warning line is prepended — the diff is always computed from disk, so what you see is what pi will apply.
+
+### Disabling
+
+```lua
+require("pi-bridge").setup({ edit_approval_prompt = false })
+```
+
+With this set, nvim never opens a float or acks; pi sees no ack within 1s and falls back to its own in-TUI overlay. The protocol stays wired (you can flip it back on per-session) but nvim will not surface the prompt.
+
+### Protocol pairing
+
+`approval_request`, `approval_resolved`, `approval_ack`, and `approval_response` are new NDJSON message types. Both `pi-bridge.nvim` and `pi-bridge.ext` must be tagged at the same version when this protocol is in use — see [Releasing](#releasing) for the paired-tag rule.
+
 ## Logging
 
 Logs to `vim.fn.stdpath("log") .. "/pi-bridge.nvim.log"` (resolves to `~/.local/state/nvim/log/pi-bridge.nvim.log` on Linux).
@@ -298,6 +331,7 @@ make test-placeholders     # placeholders module only
 make test-init             # init module only
 make test-resolve          # socket resolver only
 make test-health           # :checkhealth only
+make test-approval         # edit approval prompt only
 ```
 
 Requires Neovim 0.12.5+ and [mini.nvim](https://github.com/echasnovski/mini.nvim) (auto-fetched as a test dependency).

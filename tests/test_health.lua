@@ -454,4 +454,54 @@ T["health"]["info calls receive only 1 argument"] = function()
 	expect.equality(#result > 0, true)
 end
 
+-- Edit approval prompt support: health reports OK when the approval
+-- module is loadable. Test before and after setup to mirror real use.
+
+T["health"]["reports approval prompt support after setup"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local saw = false
+	for _, entry in ipairs(result) do
+		if entry.kind == "ok" and entry.msg and entry.msg:find("Edit approval prompt supported") then
+			saw = true
+			break
+		end
+	end
+	expect.equality(saw, true)
+end
+
+T["health"]["reports approval prompt support before setup (module-only check)"] = function()
+	local result = child.lua([[
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local saw = false
+	for _, entry in ipairs(result) do
+		if entry.kind == "ok" and entry.msg and entry.msg:find("Edit approval prompt supported") then
+			saw = true
+			break
+		end
+	end
+	expect.equality(saw, true)
+end
+
 return T
