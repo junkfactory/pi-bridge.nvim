@@ -236,7 +236,9 @@ function M.prompt(opts)
 	opts = opts or {}
 
 	local mode = opts.mode or "normal"
-	if vim.fn.mode() == "v" or vim.fn.mode() == "\22" then
+	-- Visual keymaps land here while visual is still active; include
+	-- linewise V (block \22 is covered by \22, 'v' by "v").
+	if vim.fn.mode() == "v" or vim.fn.mode() == "V" or vim.fn.mode() == "\22" then
 		mode = "visual"
 	end
 

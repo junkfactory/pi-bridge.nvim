@@ -43,7 +43,7 @@ T["placeholders"]["resolve replaces @selection with selected text"] = function()
 	expect.equality(result:find("bbb") ~= nil, true)
 end
 
-T["placeholders"]["resolve replaces @selection with empty string in normal mode"] = function()
+T["placeholders"]["resolve keeps literal @selection when nothing is selected"] = function()
 	child.lua([[
 		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
 		vim.api.nvim_win_set_cursor(0, { 2, 0 })
@@ -52,7 +52,50 @@ T["placeholders"]["resolve replaces @selection with empty string in normal mode"
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("check @selection here")
 	]])
-	expect.equality(result, "check  here")
+	expect.equality(result, "check @selection here")
+end
+
+T["placeholders"]["resolve replaces @selection while visual mode is still active"] = function()
+	-- The keymap flow opens the prompt (nvim 0.12 cmdline-style ui.input)
+	-- without exiting visual mode, so '< and '> are not set yet. resolve()
+	-- must read the 'v and '.' marks in that state.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	]])
+	-- Active charwise visual selection spanning "bbbccc" — resolve WITHOUT exiting.
+	child.lua([[vim.cmd('normal! v')]])
+	child.lua([[vim.api.nvim_win_set_cursor(0, { 3, 2 })]])
+	expect.equality(child.fn.mode(), "v")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("x @selection y")]])
+	expect.equality(result, "x bbb\nccc y")
+end
+
+T["placeholders"]["resolve replaces @selection with full lines while linewise visual is active"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	]])
+	-- Active linewise visual selection, cursor parked mid-line 3. Column
+	-- trimming must not cut "ccc" even though the cursor is at col 1.
+	child.lua([[vim.cmd('normal! V')]])
+	child.lua([[vim.api.nvim_win_set_cursor(0, { 3, 1 })]])
+	expect.equality(child.fn.mode(), "V")
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "bbb\nccc")
+end
+
+T["placeholders"]["resolve replaces @selection with full lines after linewise visual"] = function()
+	-- Exited linewise visual: '< and '> marks must not column-trim lines.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! V')
+		vim.api.nvim_win_set_cursor(0, { 3, 0 })
+		vim.cmd('normal! \\27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "bbb\nccc")
 end
 
 T["placeholders"]["resolve replaces @buffer with current buffer absolute path"] = function()
@@ -165,7 +208,7 @@ T["placeholders"]["resolve handles multiple placeholders"] = function()
 		return require('pi-bridge.placeholders').resolve("@this and @selection")
 	]])
 	expect.equality(result:find("line 2: bbb") ~= nil, true)
-	expect.equality(result, "line 2: bbb and ")
+	expect.equality(result, "line 2: bbb and @selection")
 end
 
 T["placeholders"]["resolve handles no diagnostics gracefully"] = function()
@@ -178,6 +221,34 @@ T["placeholders"]["resolve handles no diagnostics gracefully"] = function()
 		return require('pi-bridge.placeholders').resolve("check @diagnostics")
 	]])
 	expect.equality(result, "check No diagnostics")
+end
+
+T["placeholders"]["resolve keeps literal @buffer for unnamed buffer"] = function()
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("what is @buffer")
+	]])
+	expect.equality(result, "what is @buffer")
+end
+
+T["placeholders"]["resolve keeps literal @content for empty buffer"] = function()
+	child.lua([[vim.api.nvim_buf_set_lines(0, 0, -1, false, {}) ]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("summarize @content")
+	]])
+	expect.equality(result, "summarize @content")
+end
+
+T["placeholders"]["resolve keeps literal placeholder when a resolver errors"] = function()
+	child.lua([[
+		-- Break the APIs the resolvers depend on; pcall must catch it and
+		-- keep the literal instead of aborting the send.
+		vim.api.nvim_buf_get_lines = function() error('boom') end
+		vim.api.nvim_get_current_line = function() error('boom') end
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("see @content and @this")
+	]])
+	expect.equality(result, "see @content and @this")
 end
 
 T["placeholders"]["resolve handles empty text"] = function()

@@ -1,3 +1,5 @@
+local log = require("pi-bridge.log")
+
 local M = {}
 
 local VISUAL_MODES = { v = true, V = true, ["\22"] = true }
@@ -15,24 +17,9 @@ local function resolve_this()
 	return string.format("line %d: %s", row, line)
 end
 
-local function resolve_selection()
-	-- Check current mode first (works when called directly in visual mode).
-	-- If not in visual mode, check if we just exited visual mode via a keymap.
-	-- vim.fn.visualmode() returns the last visual mode character ('v', 'V', or '\22')
-	-- and persists after exiting visual mode, unlike vim.fn.mode() which returns 'n'.
-	local mode = vim.fn.mode()
-	if not VISUAL_MODES[mode] then
-		local last_visual = vim.fn.visualmode()
-		if not VISUAL_MODES[last_visual] then
-			return ""
-		end
-	end
-
-	-- Use persistent marks '< and '> which survive exiting visual mode.
-	-- The 'v' and '.' marks are only valid during active visual mode.
-	local start_pos = vim.fn.getpos("'<")
-	local end_pos = vim.fn.getpos("'>")
-
+-- Extract the text spanned by two marks. `linewise` keeps full lines
+-- (V selections span whole lines; column trimming would cut them).
+local function extract_selection(start_pos, end_pos, linewise)
 	local start_line = start_pos[2]
 	local start_col = start_pos[3]
 	local end_line = end_pos[2]
@@ -49,6 +36,10 @@ local function resolve_selection()
 		return ""
 	end
 
+	if linewise then
+		return table.concat(lines, "\n")
+	end
+
 	-- trim first line to start_col, last line to end_col
 	if #lines == 1 then
 		lines[1] = string.sub(lines[1], start_col, end_col)
@@ -58,6 +49,31 @@ local function resolve_selection()
 	end
 
 	return table.concat(lines, "\n")
+end
+
+local function resolve_selection()
+	local mode = vim.fn.mode()
+	if VISUAL_MODES[mode] then
+		-- Active visual mode: the '< and '> marks are NOT set yet — they are
+		-- only written when visual mode exits. A visual keymap that opens a
+		-- prompt (nvim 0.12's ui.input runs in cmdline mode and restores
+		-- visual mode afterwards) reaches resolve() while visual is still
+		-- active. Read the 'v and '.' marks, which are valid then.
+		return extract_selection(vim.fn.getpos("v"), vim.fn.getpos("."), mode == "V")
+	end
+
+	-- Exited visual mode: the input widget the keymap opened has taken
+	-- focus. Which one decides the state we see here — a floating input
+	-- (e.g. snacks.nvim overriding vim.ui.input under LazyVim) exits
+	-- visual mode, so '< and '> are set; the nvim 0.12 builtin cmdline
+	-- input restores visual mode instead (handled above). Either way
+	-- vim.fn.visualmode() returns the last visual mode used ('v', 'V',
+	-- or '\22') and persists after exiting, unlike vim.fn.mode().
+	local last_visual = vim.fn.visualmode()
+	if not VISUAL_MODES[last_visual] then
+		return ""
+	end
+	return extract_selection(vim.fn.getpos("'<"), vim.fn.getpos("'>"), last_visual == "V")
 end
 
 local function format_diagnostic(diag)
@@ -179,10 +195,23 @@ function M.resolve(text)
 
 	return (string.gsub(text, "@(%w+)", function(key)
 		local resolver = RESOLVERS[key]
-		if resolver then
-			return resolver()
+		if not resolver then
+			return nil -- unknown placeholder: keep literal
 		end
-		return "@" .. key
+		-- A resolver that errors must not break the whole send: fall
+		-- back to the literal placeholder like the empty case below.
+		local ok, value = pcall(resolver)
+		if not ok then
+			log.warn("placeholder @" .. key .. " failed to resolve: " .. tostring(value))
+			return nil
+		end
+		if value == "" then
+			-- Nothing to substitute (e.g. @selection with no selection):
+			-- keep the literal so the user sees the placeholder didn't
+			-- fire instead of silently losing it.
+			return nil
+		end
+		return value
 	end))
 end
 
