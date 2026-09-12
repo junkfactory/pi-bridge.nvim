@@ -345,45 +345,39 @@ T["init"]["setup rejects non-boolean edit_approval_prompt"] = function()
 	expect.equality(ok, false)
 end
 
-T["init"]["approval_request dispatched via registered handler opens a float"] = function()
-	local result = child.lua([[
+T["init"]["approval_request dispatched via registered handler acks and opens the picker"] = function()
+	child.lua([[
 		require('pi-bridge').setup({ log_level = 'error' })
 		-- Stub socket.send to capture outbound.
 		_G.approval_sent = {}
 		local socket = require('pi-bridge.socket')
 		socket.send = function(msg) table.insert(_G.approval_sent, msg) end
-
+		-- Mock the picker: capture the call, never answer.
+		_G._select_calls = {}
+		vim.ui.select = function(items, opts, on_choice)
+			table.insert(_G._select_calls, { count = #items, prompt = opts.prompt })
+		end
 		local dispatch = require('pi-bridge.dispatch')
 		dispatch.dispatch({
 			type = 'approval_request',
 			id = 'init-wire',
 			tool = 'edit',
 			path = '/tmp/x.lua',
-			diff = '--- a\n+++ b\n-old\n+new\n',
+			diff = '--- a\n+++ b\n',
 		})
-		local open = false
-		for _, w in ipairs(vim.api.nvim_list_wins()) do
-			local c = vim.api.nvim_win_get_config(w)
-			if c.relative and c.relative ~= '' then open = true break end
-		end
-		return { sent = _G.approval_sent, open = open }
 	]])
-	expect.equality(result.open, true)
-	local saw_ack = false
-	for _, m in ipairs(result.sent) do
-		if m.type == "approval_ack" and m.id == "init-wire" then
-			saw_ack = true
-			break
-		end
-	end
-	expect.equality(saw_ack, true)
+	local ack = child.lua("return _G.approval_sent[1]")
+	expect.equality(ack.type, "approval_ack")
+	expect.equality(ack.id, "init-wire")
+	expect.equality(child.lua("return #_G._select_calls"), 1)
 end
 
-T["init"]["approval_resolved closes float opened via dispatch"] = function()
+T["init"]["approval_resolved after dispatch is safe (late answers are discarded by pi)"] = function()
 	child.lua([[
 		require('pi-bridge').setup({ log_level = 'error' })
 		local socket = require('pi-bridge.socket')
 		socket.send = function() end
+		vim.ui.select = function() end
 		local dispatch = require('pi-bridge.dispatch')
 		dispatch.dispatch({
 			type = 'approval_request',
@@ -393,16 +387,9 @@ T["init"]["approval_resolved closes float opened via dispatch"] = function()
 			diff = 'd\n',
 		})
 		dispatch.dispatch({ type = 'approval_resolved', id = 'init-resolve' })
+		-- The picker cannot be closed remotely; resolve must not error.
 	]])
-	local open = child.lua([[
-		local open = false
-		for _, w in ipairs(vim.api.nvim_list_wins()) do
-			local c = vim.api.nvim_win_get_config(w)
-			if c.relative and c.relative ~= '' then open = true break end
-		end
-		return open
-	]])
-	expect.equality(open, false)
+	expect.equality(true, true)
 end
 
 return T

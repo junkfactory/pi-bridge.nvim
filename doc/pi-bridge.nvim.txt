@@ -123,9 +123,10 @@ log_level ~
                                      *pi-bridge-config.edit_approval_prompt*
 edit_approval_prompt ~
   true or false. Default true. When pi sends an `approval_request`
-  for an `edit`/`write` tool, Neovim shows a centered floating diff
-  window with `y` / `a` / `n` / `<Esc>` keys. Set to false to opt
-  out — pi falls back to its own TUI overlay because no
+  for an `edit`/`write` tool, Neovim renders the decision with
+  `vim.ui.select` (same picker as the launch prompt). The diff itself
+  is shown in pi's TUI as a widget above the editor. Set to false to
+  opt out — pi falls back to its own TUI overlay because no
   `approval_ack` arrives within 1s. The protocol itself is always
   wired.
 
@@ -168,27 +169,31 @@ Custom handlers: ~
 
 When pi is about to apply its built-in `edit` or `write` tool, the
 extension sends an `approval_request` event over the socket. Neovim
-opens a centered floating window with the diff and waits for a key.
+renders the decision with `vim.ui.select` — the same picker the
+"no pi instance found, launch one?" prompt uses, so it follows
+whatever picker plugin you have configured. The diff itself is shown
+in pi's TUI as a widget above the editor; Neovim is only the
+decision surface here.
 
-Keys (buffer-local, work inside the float only):
+Choices:
 
   `y`     Approve this single tool call (decision: "yes")
   `a`     Approve all future edits to that file this session ("all")
   `n`     Reject the tool call (decision: "no")
-  `<Esc>` Same as `n`
+  `<Esc>` / dismiss — treated as `n`
 
-An `approval_ack` is sent the moment the float opens, so pi stops its
-fallback timer. If no ack arrives within 1s (nvim not connected,
+An `approval_ack` is sent the moment the request arrives, so pi stops
+its fallback timer. If no ack arrives within 1s (nvim not connected,
 opt-out, etc.) pi shows its own in-TUI overlay.
 
-The float shows a `[warning] buffer has unsaved changes; diff is
-computed from disk` line above the header when a buffer for the
-target file is loaded and `&modified`. The diff is always the disk
-content vs. the proposed change — what pi would apply.
+When a buffer for the target file is loaded and `&modified`, the
+picker prompt notes `[buffer has unsaved changes; diff is computed
+from disk]` — the diff is always the disk content vs. the proposed
+change, i.e. what pi would apply.
 
-If pi resolves a request via its own fallback before the user keys,
-`approval_resolved` closes the stale float; late keypresses send a
-response pi discards harmlessly.
+If pi resolves a request via its own fallback before the user picks,
+it sends `approval_resolved`. The open picker cannot be closed
+remotely; a late answer sends a response pi discards harmlessly.
 
 ==============================================================================
 7. Healthcheck                                           *pi-bridge-healthcheck*

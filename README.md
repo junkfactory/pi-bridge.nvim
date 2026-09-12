@@ -201,9 +201,9 @@ require("pi-bridge").setup({
   log_level = "info",
 
   -- Edit approval prompt: when pi is about to edit/write a file,
-  -- show a centered diff in a floating window with y/a/n keys.
-  -- Set false to opt out (pi falls back to its own TUI overlay
-  -- because no approval_ack arrives within 1s).
+  -- Neovim shows a y/a/n picker (vim.ui.select) — the diff itself
+  -- renders in pi's TUI. Set false to opt out (pi falls back to its
+  -- own TUI overlay because no approval_ack arrives within 1s).
   edit_approval_prompt = true,
 })
 ```
@@ -288,18 +288,18 @@ Health distinguishes between "is there a server" and "is Neovim connected to it"
 
 ## Edit Approval Prompt
 
-When pi is about to apply its `edit` or `write` tool, it sends an `approval_request` over the socket. pi-bridge.nvim shows the unified diff in a centered floating window with diff syntax highlighting and three keys:
+When pi is about to apply its `edit` or `write` tool, it sends an `approval_request` over the socket. pi-bridge.nvim renders the decision with `vim.ui.select` — the same picker the launch prompt uses, so it follows whatever picker plugin you have configured. The unified diff itself is shown in pi's TUI as a widget above the editor; Neovim is only the decision surface:
 
-| Key     | Decision | Effect                                              |
+| Choice  | Decision | Effect                                              |
 |---------|----------|-----------------------------------------------------|
 | `y`     | `yes`    | Approve this single tool call                       |
 | `a`     | `all`    | Approve all future edits to that file this session  |
 | `n`     | `no`     | Reject the tool call (pi narrates the rejection)    |
-| `<Esc>` | `no`     | Same as `n`                                         |
+| `<Esc>` | `no`     | Dismissed picker — same as `n`                      |
 
-An `approval_ack` is sent the moment the window opens so pi knows Neovim took over (its own fallback overlay appears only if no ack arrives within 1s).
+An `approval_ack` is sent the moment the request arrives so pi knows Neovim took over (its own fallback overlay appears only if no ack arrives within 1s).
 
-If the buffer for the target file is loaded and `&modified`, a warning line is prepended — the diff is always computed from disk, so what you see is what pi will apply.
+If the buffer for the target file is loaded and `&modified`, the prompt notes it — the diff is always computed from disk, so what you see is what pi will apply.
 
 ### Disabling
 
@@ -307,7 +307,7 @@ If the buffer for the target file is loaded and `&modified`, a warning line is p
 require("pi-bridge").setup({ edit_approval_prompt = false })
 ```
 
-With this set, nvim never opens a float or acks; pi sees no ack within 1s and falls back to its own in-TUI overlay. The protocol stays wired (you can flip it back on per-session) but nvim will not surface the prompt.
+With this set, nvim never opens the picker or acks; pi sees no ack within 1s and falls back to its own in-TUI overlay. The protocol stays wired (you can flip it back on per-session) but nvim will not surface the prompt.
 
 ### Protocol pairing
 
