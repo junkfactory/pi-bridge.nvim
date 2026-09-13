@@ -2,7 +2,13 @@ local log = require("pi-bridge.log")
 
 local M = {}
 
+-- Send/receive toast toggle, assigned from config in init.setup()
+-- (cfg.notify). Errors and disconnect warnings bypass this gate —
+-- they use direct vim.notify and stay always visible.
+M.notify_enabled = true
+
 function M.notify(msg, level)
+	if not M.notify_enabled then return end
 	level = level or vim.log.levels.INFO
 	vim.schedule(function()
 		vim.notify("𝜋 " .. msg, level)

@@ -345,6 +345,35 @@ T["init"]["setup rejects non-boolean edit_approval_prompt"] = function()
 	expect.equality(ok, false)
 end
 
+T["init"]["notify defaults to true"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.notify, true)
+end
+
+T["init"]["notify can be set to false"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', notify = false })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.notify, false)
+
+	local enabled = child.lua([[
+		return require('pi-bridge.ui').notify_enabled
+	]])
+	expect.equality(enabled, false)
+end
+
+T["init"]["setup rejects non-boolean notify"] = function()
+	local ok = child.lua([[
+		local ok, err = pcall(require('pi-bridge').setup, { notify = 'yes' })
+		return ok
+	]])
+	expect.equality(ok, false)
+end
+
 T["init"]["approval_request dispatched via registered handler acks and opens the picker"] = function()
 	child.lua([[
 		require('pi-bridge').setup({ log_level = 'error' })

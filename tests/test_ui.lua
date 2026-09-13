@@ -117,6 +117,45 @@ T["ui"]["on_agent_end runs checktime after notification"] = function()
 	expect.equality(calls[1], 'checktime')
 end
 
+T["ui"]["notify is suppressed when notify_enabled is false"] = function()
+	child.lua([[
+		_G.notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G.notifications, { msg = msg, level = level })
+		end
+		local ui = require('pi-bridge.ui')
+		ui.notify_enabled = false
+		ui.notify('hidden message')
+		ui.on_agent_start({ type = 'agent_start', message = 'working...' })
+		ui.on_agent_end({ type = 'agent_end', message = 'done' })
+		ui.notify_enabled = true
+	]])
+	local notifs = child.lua("return _G.notifications")
+	expect.equality(#notifs, 0)
+end
+
+T["ui"]["on_agent_end still runs checktime when notify is disabled"] = function()
+	child.lua([[
+		_G.cmd_calls = {}
+		vim.cmd = function(cmd)
+			table.insert(_G.cmd_calls, cmd)
+		end
+		_G.notifications = {}
+		vim.notify = function(msg, level)
+			table.insert(_G.notifications, { msg = msg, level = level })
+		end
+		local ui = require('pi-bridge.ui')
+		ui.notify_enabled = false
+		ui.on_agent_end({ type = 'agent_end', message = 'done' })
+		ui.notify_enabled = true
+	]])
+	child.lua("vim.wait(500)")
+	local calls = child.lua("return _G.cmd_calls")
+	local notifs = child.lua("return _G.notifications")
+	expect.equality(#notifs, 0)
+	expect.equality(calls[1], 'checktime')
+end
+
 T["ui"]["on_agent_end checktime reloads buffer from disk"] = function()
 	local tmpfile = child.lua("return vim.fn.tempname()")
 	child.lua(string.format([[
