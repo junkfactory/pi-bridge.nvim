@@ -21,16 +21,16 @@
 --   the mirror-specific lines, numbered key spec, and the
 --   `ui_prompt_response` message construction.
 --
---   custom — floating window (`nvim_open_win`, `buftype=nofile`, `wrap`)
---   sized to the longest ANSI-stripped line, showing the rendered
---   dialog text. The user then drives the actual pi-side dialog from the
---   terminal; their keystrokes are captured by a `getcharstr()` loop and
---   forwarded as `ui_prompt_response {id, key}`. `<Esc>` closes the
---   mirror float WITHOUT forwarding — the dialog's hotkeys (`y/s/b/n/r`)
---   act on the dialog itself, and Esc is a no-op in the dialog's own
---   decision state, so the mirror must not pollute the dialog's input
---   stream with a spurious Esc. `ui_prompt_resolved` closes the float
---   and breaks the loop.
+--   custom — passive notice float (`nvim_open_win`, `buftype=nofile`,
+--   focused, message-only): "π pi needs your input — answer in the pi
+--   window". pi owns the dialog and its navigation completely; the notice
+--   is informational. The modal loop honors ONLY Esc: it closes the
+--   notice and injects an Esc keypress into pi's component via
+--   `ui_prompt_response {id, key = "\27"}` so the component's own Esc
+--   handler decides what abort means (deny for pi-permission-system).
+--   Any other key is swallowed (the notice says so). If the dialog
+--   resolves in pi while the loop is parked, a synthetic Esc breaks the
+--   loop so it can't swallow keys after the notice is gone.
 --
 -- Protocol notes:
 --
@@ -112,14 +112,14 @@ local pending = {} -- { [id] = { kind = "select"|"custom", send, dismiss?, dismi
 -- NOT trigger a user-Esc "cancelled" response.
 local dismissed_remote = {}
 
--- Single-flight guard for the custom float: the getcharstr loop blocks
--- the editor and only one mirror can be active at a time (pi serializes
--- anyway; this guards against a stale race).
+-- Single-flight guard for the custom notice: the getcharstr loop
+-- blocks the editor and only one mirror can be active at a time (pi
+-- serializes anyway; this guards against a stale race).
 -- NOTE: after the choice_float refactor this tracks ONLY the custom
--- float (kind="custom"); the stock float's state lives in
+-- notice (kind="custom"); the stock float's state lives in
 -- choice_float under the "mirror" owner slot. Both entry points
 -- cross-guard each other so the one-surface-at-a-time invariant holds.
-local custom_active = nil -- { id, win, buf, send, stop }
+local custom_active = nil -- { id, win, buf, send, prev_win, closed, parked }
 
 -- UI-safe bodies of dispatch handlers — forward-declared because the
 -- public wrappers schedule them (see schedule_ui below).
@@ -399,21 +399,28 @@ local function show_plugin_select(req)
 end
 
 -- ---------------------------------------------------------------------------
--- Custom mirror: floating window + key forwarding loop.
+-- Custom mirror: passive notice float (message-only; Esc aborts).
 -- ---------------------------------------------------------------------------
 
-local ANSI_SGR_PATTERN = "\27%[%d+;?%d*m"
+-- ---------------------------------------------------------------------------
+-- Custom mirror: passive notice float.
+--
+-- pi owns the dialog entirely. The notice tells the user where to answer
+-- and provides exactly one action: Esc aborts by injecting an Esc keypress
+-- into pi's component — the component's own Esc handler decides what
+-- abort means (e.g. "deny" for pi-permission-system). No other key is
+-- forwarded; keystrokes typed while the notice is focused are swallowed
+-- by the modal loop, and the notice text says so.
+-- ---------------------------------------------------------------------------
 
--- Strip SGR escape codes from a line. Minimal — only CSI SGR sequences
--- (color/style); other ANSI (cursor moves, etc.) are left intact. The
--- float is plain text only; we trade fidelity for the simplicity of a
--- one-pattern strip (R16 wrap handles width overflow).
-local function strip_ansi(line)
-	if type(line) ~= "string" or line == "" then
-		return tostring(line or "")
-	end
-	if not line:find("\27", 1, true) then return line end
-	return (line:gsub(ANSI_SGR_PATTERN, ""))
+local NOTICE_TITLE = " π pi needs your input "
+
+local function notice_lines()
+	return {
+		"Answer in the pi window.",
+		"",
+		"Esc: abort pi's input ask · other keys do nothing here",
+	}
 end
 
 local function find_custom_state(id)
@@ -422,7 +429,7 @@ local function find_custom_state(id)
 	return nil
 end
 
-local function close_custom_float(id)
+local function close_custom_float(id, inject)
 	local st = find_custom_state(id)
 	if not st then return end
 	local win, buf, prev_win = st.win, st.buf, st.prev_win
@@ -433,15 +440,36 @@ local function close_custom_float(id)
 		pcall(vim.api.nvim_buf_delete, buf, { force = true })
 	end
 	st.closed = true
+	-- Ghost-loop guard: if the modal loop is currently blocked in
+	-- getcharstr (user hasn't pressed anything since), inject a
+	-- synthetic Esc so the loop wakes, sees the closed state, and exits
+	-- instead of swallowing keystrokes after the notice is gone. The
+	-- loop breaks on the closed flag WITHOUT treating that Esc as a
+	-- user action.
+	if inject and st.parked then
+		pcall(vim.api.nvim_input, "\27")
+	end
 	if prev_win and vim.api.nvim_win_is_valid(prev_win) then
 		pcall(vim.api.nvim_set_current_win, prev_win)
 	end
-	log.debug("mirror: custom float closed for " .. tostring(id))
+	log.debug("mirror: custom notice closed for " .. tostring(id))
 end
 
 local function show_custom(req)
-	if custom_active or choice_float.is_open(OWNER) then
-		local open_id = custom_active and custom_active.id or choice_float.get_id(OWNER)
+	if custom_active then
+		-- A notice is already up (same or different id). pi serializes
+		-- prompts; later broadcasts are ignored — the notice is
+		-- message-only, there is nothing to update.
+		log.debug(
+			"mirror: notice already open ("
+				.. custom_active.id
+				.. "), ignoring request "
+				.. tostring(req.id)
+		)
+		return
+	end
+	if choice_float.is_open(OWNER) then
+		local open_id = choice_float.get_id(OWNER)
 		log.warn(
 			"mirror: surface already open for "
 				.. tostring(open_id)
@@ -450,25 +478,18 @@ local function show_custom(req)
 		)
 		return
 	end
-	local raw_lines = req.lines or {}
-	local stripped = {}
+	local lines = notice_lines()
 	local max_len = 1
-	for _, l in ipairs(raw_lines) do
-		local s = strip_ansi(l)
-		stripped[#stripped + 1] = s
-		if #s > max_len then max_len = #s end
-	end
-	if #stripped == 0 then
-		log.warn("mirror: custom request has no lines, ignoring")
-		return
+	for _, l in ipairs(lines) do
+		if #l > max_len then max_len = #l end
 	end
 	local width = math.max(20, math.min(max_len + 2, vim.o.columns - 4))
-	local height = #stripped
+	local height = #lines
 
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].swapfile = false
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, stripped)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
 	local total_lines = vim.o.lines
 	local total_cols = vim.o.columns
@@ -476,7 +497,9 @@ local function show_custom(req)
 	local col = math.max(0, math.floor((total_cols - width) / 2))
 
 	local prev_win = vim.api.nvim_get_current_win()
-	local win = vim.api.nvim_open_win(buf, false, {
+	-- Focused float: nvim's input belongs to the notice while it's up.
+	-- The message text sets that expectation ("other keys do nothing").
+	local win = vim.api.nvim_open_win(buf, true, {
 		relative = "editor",
 		width = width,
 		height = height,
@@ -484,12 +507,16 @@ local function show_custom(req)
 		col = col,
 		style = "minimal",
 		border = "rounded",
-		title = " pi custom prompt ",
+		title = NOTICE_TITLE,
 		title_pos = "center",
 	})
-	-- wrap is window-local, not buffer-local. Set after the window is
-	-- open so long lines don't overflow the float width (R16).
-	vim.api.nvim_set_option_value("wrap", true, { win = win })
+
+	-- nvim defers screen redraw while Lua is executing, so a float
+	-- opened right before a blocking getcharstr loop would never be
+	-- painted (observed live: float existed, keys forwarded, screen
+	-- stale). Force a redraw before entering the modal loop — the
+	-- classic dressing.nvim-style fix.
+	vim.cmd("redraw")
 
 	local state = {
 		kind = "custom",
@@ -499,45 +526,50 @@ local function show_custom(req)
 		send = req._send,
 		prev_win = prev_win,
 		closed = false,
+		parked = false,
 	}
 	custom_active = state
-	log.info("mirror: custom float opened for " .. tostring(req.id))
+	log.info("mirror: custom notice opened for " .. tostring(req.id))
 
-	-- Modal getchar loop. Breaks when the float is closed (by resolve
-	-- or by the user's own Esc). Each non-Esc key is forwarded as a
-	-- ui_prompt_response {id, key}. Esc closes the float only — does
-	-- NOT forward, per R10.
+	-- Modal loop: only Esc is honored. Esc closes the notice AND injects
+	-- Esc into pi's component (the component's own Esc handler decides
+	-- what abort means). Every other key is swallowed — no forwarding.
 	vim.schedule(function()
 		-- If a resolve() raced in between scheduling and running, bail.
 		if state.closed or custom_active ~= state then return end
-		local send = state.send
-		local id = state.id
 		while not state.closed do
+			state.parked = true
 			local ok, key = pcall(vim.fn.getcharstr)
+			state.parked = false
+			-- Closed while parked (resolved / disconnected): break
+			-- WITHOUT treating the wake-up Esc as a user action.
+			if state.closed then break end
 			if not ok or key == nil or key == "" then
-				-- getcharstr() can fail on interrupt; treat as Esc
-				-- so the user always has a way out.
-				close_custom_float(id)
+				-- getcharstr() can fail on interrupt; treat as Esc so
+				-- the user always has a way out.
+				close_custom_float(state.id, false)
 				break
 			end
-			-- Esc (or CSI-u Esc under kitty) closes only.
+			-- Esc (or CSI-u Esc under kitty): abort pi's input ask.
 			if key == "\27" or key:sub(1, 3) == "\27[" then
-				close_custom_float(id)
+				close_custom_float(state.id, false)
+				local send = state.send
+				if type(send) == "function" then
+					local sok, serr = pcall(send, {
+						type = "ui_prompt_response",
+						id = state.id,
+						key = "\27",
+					})
+					if not sok then
+						log.error("mirror: esc inject failed: " .. tostring(serr))
+					end
+				end
 				break
 			end
-			if type(send) == "function" then
-				local sok, serr = pcall(send, {
-					type = "ui_prompt_response",
-					id = id,
-					key = key,
-				})
-				if not sok then
-					log.error("mirror: key forward failed: " .. tostring(serr))
-				end
-			end
+			-- Any other key: swallowed, nothing sent. The notice says so.
 		end
-		-- Defensive: ensure state cleared even if loop exited via
-		-- remote-resolve while still iterating.
+		-- Defensive: ensure state cleared even if the loop exited via
+		-- an external close while still iterating.
 		if custom_active == state then
 			custom_active = nil
 		end
@@ -614,10 +646,10 @@ function handle_resolved_sync(id)
 		choice_float.close(OWNER)
 		return
 	end
-	-- Custom mirror float: tracked under custom_active (kind="custom").
+	-- Custom mirror notice: tracked under custom_active (kind="custom").
 	local cst = find_custom_state(id)
 	if cst then
-		close_custom_float(id)
+		close_custom_float(id, true)
 		custom_active = nil
 		return
 	end
@@ -641,7 +673,7 @@ function M.dismiss_all()
 		-- the wiring's disconnect notice is the user-visible echo.
 		choice_float.close(OWNER)
 		if custom_active then
-			close_custom_float(custom_active.id)
+			close_custom_float(custom_active.id, true)
 			custom_active = nil
 		end
 		log.debug("mirror: dismiss_all, surfaces closed")

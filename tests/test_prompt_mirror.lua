@@ -489,8 +489,8 @@ T["mirror"]["unknown kind is logged and surfaces nothing"] = function()
 end
 
 -- ---------------------------------------------------------------------------
--- Custom mirror: float renders ANSI-stripped lines, key forwarding, Esc
--- closes-only, resolved closes.
+-- Custom mirror: message-only notice, Esc aborts via key injection,
+-- resolved closes + breaks the parked loop.
 -- ---------------------------------------------------------------------------
 
 local function mock_getcharstr_seq(seq)
@@ -514,7 +514,7 @@ local function mock_getcharstr_seq(seq)
 	]], table.concat(args, ", ")))
 end
 
-T["mirror"]["custom float renders stripped lines"] = function()
+T["mirror"]["custom notice shows message only"] = function()
 	child.lua([[
 		mirror.setup({ ui_prompt_mirror = true })
 		-- Block getcharstr entirely so the modal loop never progresses
@@ -527,27 +527,90 @@ T["mirror"]["custom float renders stripped lines"] = function()
 			id = 'cust-1',
 			kind = 'custom',
 			lines = {
-				'\27[31mred\27[0m text',
-				'\27[1;33mbold yellow\27[0m',
-				'plain line',
+				'\27[38;2;122;162;247mPermission Required\27[0m',
+				'tool    : bash',
+				'▶ (y) Yes',
 			},
 		}, fake_send)
 	]])
 	expect.equality(child.lua(IS_FLOAT_OPEN), true)
 	local lines = child.lua(FLOAT_LINES)
-	expect.equality(lines[1], "red text")
-	expect.equality(lines[2], "bold yellow")
-	expect.equality(lines[3], "plain line")
-	-- No color escapes leaked into the float.
+	-- Message-only: the pi dialog's rendered lines are NOT mirrored.
+	expect.equality(lines[1], "Answer in the pi window.")
+	expect.equality(lines[3], "Esc: abort pi's input ask · other keys do nothing here")
 	for _, l in ipairs(lines) do
-		expect.equality(l:find("\27", 1, true) ~= nil, false)
+		expect.equality(l:find("Permission Required", 1, true) ~= nil, false)
 	end
 end
 
-T["mirror"]["custom float forwards keys verbatim"] = function()
-	mock_getcharstr_seq({ "y", "y", "s", "x" })
+T["mirror"]["custom float forces a redraw before the modal loop"] = function()
+	-- Regression: nvim defers screen redraw while Lua executes, so the
+	-- float opened immediately before a blocking getcharstr loop was
+	-- never painted (found in live e2e testing: window existed, keys
+	-- forwarded, terminal stale). show_custom must call vim.cmd('redraw')
+	-- after opening the float.
+	child.lua([[
+		vim.fn.getcharstr = function() vim.wait(1000, function() return false end, 100); return '' end
+		_G._orig_vim_cmd = vim.cmd
+		_G._redraw_calls = 0
+		vim.cmd = function(cmd)
+			if cmd == 'redraw' then _G._redraw_calls = _G._redraw_calls + 1 end
+			return _G._orig_vim_cmd(cmd)
+		end
+		mirror._handle_request({
+			type = 'ui_prompt_request',
+			id = 'redraw-1',
+			kind = 'custom',
+			lines = { 'a' },
+		}, fake_send)
+	]])
+	-- The scheduled show_custom callback runs during the RPC roundtrip
+	-- below (same timing assumption as the renders-stripped-lines test).
+	local redraw_calls = child.lua("return _G._redraw_calls")
+	expect.equality(redraw_calls >= 1, true)
+	child.lua("vim.cmd = _G._orig_vim_cmd")
+end
+
+T["mirror"]["custom notice ignores re-render broadcasts"] = function()
+	-- pi re-broadcasts the same id when its dialog re-renders. The
+	-- notice is message-only: it must NOT change content and must NOT
+	-- spawn a duplicate surface.
+	child.lua([[
+		vim.fn.getcharstr = function() vim.wait(1000, function() return false end, 100); return '' end
+		mirror._handle_request({
+			type = 'ui_prompt_request',
+			id = 'upd-1',
+			kind = 'custom',
+			lines = { 'first render' },
+		}, fake_send)
+	]])
+	expect.equality(child.lua(IS_FLOAT_OPEN), true)
+	expect.equality(child.lua(FLOAT_LINES)[1], "Answer in the pi window.")
+	-- Re-render: same id, changed lines — the notice must not change.
+	child.lua([[
+
+		mirror._handle_request({
+			type = 'ui_prompt_request',
+			id = 'upd-1',
+			kind = 'custom',
+			lines = { '(y) Yes', '(n) No' },
+		}, fake_send)
+	]])
+	local lines = child.lua(FLOAT_LINES)
+	expect.equality(lines[1], "Answer in the pi window.")
+	-- Still exactly one surface — no duplicate float spawned.
+	expect.equality(child.lua(IS_FLOAT_OPEN), true)
+	child.lua("vim.fn.getcharstr = function() return '' end")
+end
+
+T["mirror"]["custom notice swallows non-Esc keys"] = function()
+	-- Mock yields a non-Esc key slowly (1s park per call, like the
+	-- blocked mock): the loop stays parked on the second call for the
+	-- duration of the test. Exhausting the seq mock (return '') would
+	-- be an interrupt → close, which is tested elsewhere.
 	child.lua([[
 		mirror.setup({ ui_prompt_mirror = true })
+		vim.fn.getcharstr = function() vim.wait(1000, function() return false end, 100); return 'y' end
 		mirror._handle_request({
 			type = 'ui_prompt_request',
 			id = 'cust-keys',
@@ -555,24 +618,21 @@ T["mirror"]["custom float forwards keys verbatim"] = function()
 			lines = { 'dialog text' },
 		}, fake_send)
 	]])
-	child.lua("vim.wait(500, function() return #_G.mirror_sent >= 4 end, 20)")
+	child.lua("vim.wait(500)")
 	local sent = child.lua("return _G.mirror_sent")
-	local keys = {}
 	for _, m in ipairs(sent) do
-		if m.type == "ui_prompt_response" and m.id == "cust-keys" and m.key ~= nil then
-			table.insert(keys, m.key)
-		end
+		expect.equality(m.type == "ui_prompt_response", false)
 	end
-	expect.equality(#keys >= 4, true)
-	expect.equality(keys[1], "y")
-	expect.equality(keys[2], "y")
-	expect.equality(keys[3], "s")
-	expect.equality(keys[4], "x")
+	-- Notice stays up while parked.
+	expect.equality(child.lua(IS_FLOAT_OPEN), true)
+	child.lua("vim.fn.getcharstr = function() return '' end")
 end
 
-T["mirror"]["custom float Esc closes only and forwards nothing"] = function()
-	-- Sequence ends with Esc; after Esc the loop must break and stop
-	-- sending further keys even though the seq mock could yield more.
+T["mirror"]["custom notice Esc injects esc into pi and closes"] = function()
+	-- y is swallowed; Esc closes the notice and sends exactly one
+	-- ui_prompt_response carrying the raw Esc byte — the component's
+	-- own Esc handler decides what abort means. The trailing seq key
+	-- must never be sent (loop broke on Esc).
 	mock_getcharstr_seq({ "y", "\27", "s" })
 	child.lua([[
 		mirror.setup({ ui_prompt_mirror = true })
@@ -588,20 +648,22 @@ T["mirror"]["custom float Esc closes only and forwards nothing"] = function()
 	-- continued past Esc (it must not).
 	child.lua("vim.wait(300)")
 	local sent = child.lua("return _G.mirror_sent")
-	local key_sends = {}
+	local resp = {}
 	for _, m in ipairs(sent) do
 		if m.type == "ui_prompt_response" and m.id == "cust-esc" then
-			table.insert(key_sends, m)
+			table.insert(resp, m)
 		end
 	end
-	expect.equality(#key_sends, 1)
-	expect.equality(key_sends[1].key, "y")
+	expect.equality(#resp, 1)
+	expect.equality(resp[1].key, "\27")
 	expect.equality(child.lua(IS_FLOAT_OPEN), false)
 end
 
-T["mirror"]["custom float resolved closes the float"] = function()
+T["mirror"]["custom notice resolved closes the float and stops the loop"] = function()
 	-- Sequence blocks (empty mock that yields) → loop is parked.
-	-- ui_prompt_resolved must close the float and clear state.
+	-- ui_prompt_resolved must close the notice, clear state, and stop
+	-- the parked modal loop (ghost-loop guard): no key may be sent
+	-- after resolution.
 	child.lua([[
 		mirror.setup({ ui_prompt_mirror = true })
 		vim.fn.getcharstr = function() vim.wait(1000, function() return false end, 100); return '' end
@@ -616,6 +678,12 @@ T["mirror"]["custom float resolved closes the float"] = function()
 	child.lua("mirror._handle_resolved({ type = 'ui_prompt_resolved', id = 'cust-res' })")
 	child.lua("vim.wait(200, function() for _, w in ipairs(vim.api.nvim_list_wins()) do local c = vim.api.nvim_win_get_config(w); if c.relative == '' then return true end end; return false end, 20)")
 	expect.equality(child.lua(IS_FLOAT_OPEN), false)
+	-- Parked loop must be broken: subsequent mock keys send nothing.
+	child.lua("vim.wait(300)")
+	local sent = child.lua("return _G.mirror_sent")
+	for _, m in ipairs(sent) do
+		expect.equality(m.type == "ui_prompt_response", false)
+	end
 end
 
 -- ---------------------------------------------------------------------------
