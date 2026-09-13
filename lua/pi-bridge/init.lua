@@ -75,13 +75,16 @@ local function ensure_connection(cb)
 
 	-- Notify once per remote disconnect; never auto-launch from here.
 	-- Suppressed during local VimLeavePre cleanup so users do not see a
-	-- spurious message when they quit Neovim normally.
+	-- spurious message when they quit Neovim normally. Also routes to
+	-- approval.on_remote_disconnect() so a mid-prompt pi exit closes
+	-- any open approval picker with a "pi disconnected" message.
 	local on_disconnect = function()
 		vim.schedule(function()
 			vim.notify(
 				"𝜋 pi session disconnected; launch pi to reconnect",
 				vim.log.levels.WARN
 			)
+			pcall(approval.on_remote_disconnect)
 		end)
 		log.info("remote disconnect from pi session")
 	end
@@ -206,10 +209,12 @@ function M.setup(opts)
 
 	-- Edit approval gate: pi asks before applying edit/write tools.
 	-- We always wire these handlers; the module decides at runtime
-	-- whether to actually open the float based on edit_approval_prompt.
-	-- ack must be sent within 1s, so show() emits it right after the
-	-- window opens. approval_resolved is pi's signal that the float is
-	-- stale (e.g. its own fallback already answered).
+	-- whether to actually open the picker based on edit_approval_prompt.
+	-- Ack is sent immediately on request receipt. approval_resolved
+	-- means pi's own prompt answered first; nvim dismisses its picker
+	-- silently (no response, no echo). The disconnect handler below
+	-- also routes to approval.on_remote_disconnect() so a mid-prompt
+	-- pi exit closes the picker with a "pi disconnected" message.
 	approval.setup(config)
 	dispatch.register("approval_request", function(msg)
 		approval.show(msg, socket.send)

@@ -254,4 +254,149 @@ T["approval"]["dispatch wires approval_request to show"] = function()
 	expect.equality(saw_ack, true)
 end
 
+-- ---------------------------------------------------------------------------
+-- New-design behaviors: stock detection, resolve-dismissal, pi-disconnect
+-- ---------------------------------------------------------------------------
+
+T["approval"]["is_stock_picker detects stock vs wrapped by source"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true })")
+	-- Headless test env: vim.ui.select is the runtime builtin → stock.
+	expect.equality(child.lua("return approval.is_stock_picker()"), true)
+	-- Wrap it (any non-runtime source) → not stock.
+	child.lua([[
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice) stock(items, opts, on_choice) end
+	]])
+	expect.equality(child.lua("return approval.is_stock_picker()"), false)
+end
+
+T["approval"]["stock path routes to the fallback float, not vim.ui.select"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	-- No mock installed: stock builtin active. show() must open the float.
+	child.lua(make_request("fs-route"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+	local sent = messages()
+	expect.equality(#sent, 1) -- ack only
+	expect.equality(sent[1].type, "approval_ack")
+end
+
+T["approval"]["resolve(id) dismisses the fallback float without responding"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	child.lua(make_request("fs-resolve"))
+	child.lua("approval.resolve('fs-resolve')")
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), false)
+	expect.equality(#messages(), 1) -- ack only; no response sent
+end
+
+T["approval"]["wrapper path: resolve(id) dismisses without sending a response"] = function()
+	-- Simulate a plugin picker: non-stock select that stores on_choice
+	-- (async — never calls it on its own).
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._plugin_on_choice = nil
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_on_choice = on_choice
+		end
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("wrap-1"))
+	-- Wrapper installed on top of the mock; the request is pending.
+	local sent = messages()
+	expect.equality(#sent, 1)
+	expect.equality(sent[1].type, "approval_ack")
+	-- pi answered first (approval_resolved) → dismiss, no response.
+	child.lua("approval.resolve('wrap-1')")
+	expect.equality(#messages(), 1)
+	-- The plugin's eventual on_choice(nil) must NOT send "no".
+	child.lua("_G._plugin_on_choice(nil)")
+	expect.equality(#messages(), 1)
+end
+
+T["approval"]["wrapper path: user choice still sends the decision"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._plugin_on_choice = nil
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_on_choice = on_choice
+		end
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("wrap-2"))
+	child.lua("_G._plugin_on_choice({ label = 'y — approve this edit', decision = 'yes' })")
+	local sent = messages()
+	expect.equality(#sent, 2)
+	expect.equality(sent[2].type, "approval_response")
+	expect.equality(sent[2].decision, "yes")
+end
+
+T["approval"]["wrapper call-through invokes the picker present at install time"] = function()
+	-- Regression: a picker that wraps AFTER setup() must still receive the
+	-- call (not the stock builtin, which blocks).
+	child.lua("approval.setup({ edit_approval_prompt = true })") -- captures stock
+	child.lua([[
+		_G._plugin_called = false
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_called = true
+			_G._plugin_on_choice = on_choice
+		end
+	]])
+	child.lua(make_request("wrap-3"))
+	expect.equality(child.lua("return _G._plugin_called"), true)
+end
+
+T["approval"]["on_remote_disconnect closes the float, notifies, sends nothing"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	child.lua([[
+		_G._notified = {}
+		vim.notify = function(msg, level)
+			table.insert(_G._notified, { msg = msg, level = level })
+		end
+	]])
+	child.lua(make_request("dc-1"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+	child.lua("approval.on_remote_disconnect()")
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), false)
+	expect.equality(child.lua("return #_G.approval_sent"), 1) -- ack only
+	local notified = child.lua("return _G._notified")
+	expect.equality(#notified, 1)
+	expect.equality(notified[1].msg, "pi-bridge: pi disconnected")
+end
+
+T["approval"]["on_remote_disconnect dismisses the wrapped picker without responding"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._plugin_on_choice = nil
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_on_choice = on_choice
+		end
+		_G._notified = {}
+		vim.notify = function(msg, level) _G._notified[#_G._notified + 1] = msg end
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("dc-2"))
+	child.lua("approval.on_remote_disconnect()")
+	expect.equality(child.lua("return #_G.approval_sent"), 1) -- ack only; no response
+	-- The plugin's eventual nil callback is guarded → still no response.
+	child.lua("_G._plugin_on_choice(nil)")
+	expect.equality(child.lua("return #_G.approval_sent"), 1)
+	expect.equality(child.lua("return #_G._notified >= 1"), true)
+end
+
+T["approval"]["on_remote_disconnect with no picker open is a no-op"] = function()
+	child.lua(
+		"approval.setup({ edit_approval_prompt = true })"
+			.. " _G.approval_sent = {}"
+			.. " _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end"
+	)
+	expect.equality(child.lua("return select(1, pcall(approval.on_remote_disconnect))"), true)
+	expect.equality(child.lua("return #_G.approval_sent"), 0)
+end
+
 return T

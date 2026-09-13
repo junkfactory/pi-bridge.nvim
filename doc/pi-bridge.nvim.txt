@@ -123,11 +123,13 @@ log_level ~
                                      *pi-bridge-config.edit_approval_prompt*
 edit_approval_prompt ~
   true or false. Default true. When pi sends an `approval_request`
-  for an `edit`/`write` tool, Neovim renders the decision with
-  `vim.ui.select` (same picker as the launch prompt). The diff itself
-  is shown in pi's TUI as a widget above the editor. Set to false to
-  opt out — pi falls back to its own TUI overlay because no
-  `approval_ack` arrives within 1s. The protocol itself is always
+  for an `edit`/`write` tool from a Neovim-originated turn, Neovim
+  renders the decision with your configured `vim.ui.select` picker
+  (or pi-bridge's own floating prompt when the stock picker is in
+  use). pi shows the same y/a/n choice in its own TUI; whichever
+  answers first wins, and `approval_resolved` dismisses the Neovim
+  picker automatically. Set to false to opt out — pi's own prompt
+  becomes the sole decision surface. The protocol itself is always
   wired.
 
 ==============================================================================
@@ -167,13 +169,13 @@ Custom handlers: ~
 ==============================================================================
 6. Approval prompt                                   *pi-bridge-approval-prompt*
 
-When pi is about to apply its built-in `edit` or `write` tool, the
-extension sends an `approval_request` event over the socket. Neovim
-renders the decision with `vim.ui.select` — the same picker the
-"no pi instance found, launch one?" prompt uses, so it follows
-whatever picker plugin you have configured. The diff itself is shown
-in pi's TUI as a widget above the editor; Neovim is only the
-decision surface here.
+When pi is about to apply its built-in `edit` or `write` tool for a
+request that originated from Neovim, the extension sends an
+`approval_request` event over the socket. Neovim renders the decision
+with your configured `vim.ui.select` picker; with the stock picker
+(which cannot be closed programmatically) pi-bridge shows its own
+minimal floating prompt instead. pi's TUI shows the same y/a/n choice
+in place of its input box; whichever surface answers first wins.
 
 Choices:
 
@@ -182,18 +184,22 @@ Choices:
   `n`     Reject the tool call (decision: "no")
   `<Esc>` / dismiss — treated as `n`
 
-An `approval_ack` is sent the moment the request arrives, so pi stops
-its fallback timer. If no ack arrives within 1s (nvim not connected,
-opt-out, etc.) pi shows its own in-TUI overlay.
+An `approval_ack` is sent the moment the request arrives (kept for
+older-pi compatibility; current pi imposes no ack timeout).
+
+Edits typed directly into pi are never gated — only Neovim-sent
+requests prompt.
 
 When a buffer for the target file is loaded and `&modified`, the
 picker prompt notes `[buffer has unsaved changes; diff is computed
 from disk]` — the diff is always the disk content vs. the proposed
 change, i.e. what pi would apply.
 
-If pi resolves a request via its own fallback before the user picks,
-it sends `approval_resolved`. The open picker cannot be closed
-remotely; a late answer sends a response pi discards harmlessly.
+When the request settles — either surface answered, or the request
+was cancelled — pi broadcasts `approval_resolved` and the Neovim
+picker is dismissed automatically; no response is sent for the
+dismissal. If pi disconnects while the picker is open, the picker
+closes with a `pi disconnected` message.
 
 ==============================================================================
 7. Healthcheck                                           *pi-bridge-healthcheck*
