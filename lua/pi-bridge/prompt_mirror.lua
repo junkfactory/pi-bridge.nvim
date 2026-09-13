@@ -15,9 +15,11 @@
 --   from the picker's return value (same pattern as `approval.lua`).
 --   Stock `vim.ui.select` (which blocks in `inputlist()` and cannot be
 --   dismissed programmatically) is unsupported for mirror; we open our
---   own minimal float with numbered keys 1..9 + Esc, mirroring the gate's
---   fallback pattern. (We do NOT import `fallback-select` because that
---   module is approval-specific and we cannot modify its behavior.)
+--   own minimal float with numbered keys 1..9 + Esc. The float mechanics
+--   are shared with the gate's fallback float via `choice_float.lua`
+--   (which owns the window/buffer/keymap plumbing); this module supplies
+--   the mirror-specific lines, numbered key spec, and the
+--   `ui_prompt_response` message construction.
 --
 --   custom — floating window (`nvim_open_win`, `buftype=nofile`, `wrap`)
 --   sized to the longest ANSI-stripped line, showing the rendered
@@ -64,6 +66,7 @@
 --   semantics — same as `approval.lua`.
 
 local log = require("pi-bridge.log")
+local choice_float = require("pi-bridge.choice_float")
 
 local M = {}
 
@@ -112,6 +115,10 @@ local dismissed_remote = {}
 -- Single-flight guard for the custom float: the getcharstr loop blocks
 -- the editor and only one mirror can be active at a time (pi serializes
 -- anyway; this guards against a stale race).
+-- NOTE: after the choice_float refactor this tracks ONLY the custom
+-- float (kind="custom"); the stock float's state lives in
+-- choice_float under the "mirror" owner slot. Both entry points
+-- cross-guard each other so the one-surface-at-a-time invariant holds.
 local custom_active = nil -- { id, win, buf, send, stop }
 
 -- UI-safe bodies of dispatch handlers — forward-declared because the
@@ -175,9 +182,13 @@ local function send_response(id, value, cancelled, key)
 end
 
 -- ---------------------------------------------------------------------------
--- Stock picker path: a minimal owned float, mirrors fallback-select's shape
--- but for variable-length option lists. Numbered choices 1..9 + Esc.
+-- Stock picker path: a minimal owned float (mechanics via choice_float),
+-- for variable-length option lists. Numbered choices 1..9 + Esc.
 -- ---------------------------------------------------------------------------
+
+-- Owner slot in choice_float. Distinct from approval's so the two
+-- features' floats can coexist.
+local OWNER = "mirror"
 
 local function build_stock_lines(title, options)
 	local lines = {}
@@ -197,91 +208,14 @@ local function build_stock_lines(title, options)
 	return lines
 end
 
-local function find_stock_state(id)
-	if not custom_active or custom_active.kind ~= "stock" then return nil end
-	if custom_active.id == id then return custom_active end
-	return nil
-end
-
-local function close_stock(id)
-	local st = find_stock_state(id)
-	if not st then return end
-	local win, buf, prev_win = st.win, st.buf, st.prev_win
-	if win and vim.api.nvim_win_is_valid(win) then
-		pcall(vim.api.nvim_win_close, win, true)
-	end
-	if buf and vim.api.nvim_buf_is_valid(buf) then
-		pcall(vim.api.nvim_buf_delete, buf, { force = true })
-	end
-	custom_active = nil
-	if prev_win and vim.api.nvim_win_is_valid(prev_win) then
-		pcall(vim.api.nvim_set_current_win, prev_win)
-	end
-	log.debug("mirror: stock float closed for " .. tostring(id))
-end
-
-local function install_stock_keymaps(buf, options)
-	local function map(key, idx)
-		vim.keymap.set("n", key, function()
-			local st = custom_active
-			if not st or st.kind ~= "stock" then return end
-			local send = st.send
-			local id = st.id
-			local opt = options[idx]
-			close_stock(id)
-			if type(send) ~= "function" then return end
-			local ok, err = pcall(send, {
-				type = "ui_prompt_response",
-				id = id,
-				value = opt,
-			})
-			if not ok then
-				log.error("mirror: stock send failed: " .. tostring(err))
-			end
-		end, { buffer = buf, nowait = true, silent = true })
-	end
-	for i = 1, math.min(#options, 9) do
-		map(tostring(i), i)
-	end
-	vim.keymap.set("n", "<Esc>", function()
-		local st = custom_active
-		if not st or st.kind ~= "stock" then return end
-		local send = st.send
-		local id = st.id
-		close_stock(id)
-		if type(send) ~= "function" then return end
-		local ok, err = pcall(send, {
-			type = "ui_prompt_response",
-			id = id,
-			cancelled = true,
-		})
-		if not ok then
-			log.error("mirror: stock cancel send failed: " .. tostring(err))
-		end
-	end, { buffer = buf, nowait = true, silent = true })
-	vim.keymap.set("n", "<C-c>", function()
-		local st = custom_active
-		if not st or st.kind ~= "stock" then return end
-		local send = st.send
-		local id = st.id
-		close_stock(id)
-		if type(send) ~= "function" then return end
-		local ok, err = pcall(send, {
-			type = "ui_prompt_response",
-			id = id,
-			cancelled = true,
-		})
-		if not ok then
-			log.error("mirror: stock cancel send failed: " .. tostring(err))
-		end
-	end, { buffer = buf, nowait = true, silent = true })
-end
-
 local function show_stock(req)
-	if custom_active then
+	-- One mirror surface at a time: cross-guard the custom float (its
+	-- state lives in custom_active) and our own stock slot.
+	if custom_active or choice_float.is_open(OWNER) then
+		local open_id = custom_active and custom_active.id or choice_float.get_id(OWNER)
 		log.warn(
 			"mirror: surface already open for "
-				.. tostring(custom_active.id)
+				.. tostring(open_id)
 				.. ", ignoring request "
 				.. tostring(req.id)
 		)
@@ -300,42 +234,44 @@ local function show_stock(req)
 		if #l > max_len then max_len = #l end
 	end
 	local width = math.max(20, math.min(max_len + 2, vim.o.columns - 4))
-	local height = #lines
 
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.bo[buf].bufhidden = "wipe"
-	vim.bo[buf].swapfile = false
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	-- Numbered keys map to option values; Esc/<C-c> carry nil, which the
+	-- on_choice closure maps to a `cancelled` response.
+	local keys = {}
+	for i = 1, math.min(#options, 9) do
+		keys[#keys + 1] = { key = tostring(i), value = options[i] }
+	end
+	keys[#keys + 1] = { key = "<Esc>", value = nil }
+	keys[#keys + 1] = { key = "<C-c>", value = nil }
 
-	local total_lines = vim.o.lines
-	local total_cols = vim.o.columns
-	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
-	local col = math.max(0, math.floor((total_cols - width) / 2))
-
-	local prev_win = vim.api.nvim_get_current_win()
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = "editor",
-		width = width,
-		height = height,
-		row = row,
-		col = col,
-		style = "minimal",
-		border = "rounded",
+	local id = req.id
+	local send = req._send
+	local opened = choice_float.open({
+		owner = OWNER,
+		id = id,
 		title = " pi prompt ",
-		title_pos = "center",
+		width = width,
+		lines = lines,
+		keys = keys,
+		on_choice = function(value)
+			-- choice_float closes before calling on_choice, matching the
+			-- pre-refactor close-then-send order.
+			if type(send) ~= "function" then return end
+			local msg = { type = "ui_prompt_response", id = id }
+			if value ~= nil then
+				msg.value = value
+			else
+				msg.cancelled = true
+			end
+			local ok, err = pcall(send, msg)
+			if not ok then
+				log.error("mirror: stock send failed: " .. tostring(err))
+			end
+		end,
 	})
-
-	custom_active = {
-		kind = "stock",
-		id = req.id,
-		win = win,
-		buf = buf,
-		send = req._send,
-		prev_win = prev_win,
-	}
-
-	install_stock_keymaps(buf, options)
-	log.info("mirror: stock picker opened for " .. tostring(req.id))
+	if opened then
+		log.info("mirror: stock picker opened for " .. tostring(id))
+	end
 end
 
 -- ---------------------------------------------------------------------------
@@ -504,10 +440,11 @@ local function close_custom_float(id)
 end
 
 local function show_custom(req)
-	if custom_active then
+	if custom_active or choice_float.is_open(OWNER) then
+		local open_id = custom_active and custom_active.id or choice_float.get_id(OWNER)
 		log.warn(
 			"mirror: surface already open for "
-				.. tostring(custom_active.id)
+				.. tostring(open_id)
 				.. ", ignoring request "
 				.. tostring(req.id)
 		)
@@ -671,15 +608,13 @@ function handle_resolved_sync(id)
 		-- cleanup once the callback fires.
 		return
 	end
-	-- Stock picker path: the float is tracked under custom_active with
-	-- kind="stock". Close it without sending a response.
-	local stk = find_stock_state(id)
-	if stk then
-		close_stock(id)
-		custom_active = nil
+	-- Stock picker path: the float is tracked in choice_float under the
+	-- "mirror" owner slot. Close it without sending a response.
+	if choice_float.get_id(OWNER) == id then
+		choice_float.close(OWNER)
 		return
 	end
-	-- Custom mirror float: tracked under custom_active with kind="custom".
+	-- Custom mirror float: tracked under custom_active (kind="custom").
 	local cst = find_custom_state(id)
 	if cst then
 		close_custom_float(id)
@@ -702,13 +637,11 @@ function M.dismiss_all()
 			-- wrapped_on_choice still needs the dismissed_remote flag
 			-- to no-op. The wrapper clears it after firing.
 		end
+		-- Stock float (choice_float) and custom float are closed silently;
+		-- the wiring's disconnect notice is the user-visible echo.
+		choice_float.close(OWNER)
 		if custom_active then
-			local id = custom_active.id
-			if custom_active.kind == "custom" then
-				close_custom_float(id)
-			elseif custom_active.kind == "stock" then
-				close_stock(id)
-			end
+			close_custom_float(custom_active.id)
 			custom_active = nil
 		end
 		log.debug("mirror: dismiss_all, surfaces closed")
@@ -731,6 +664,7 @@ function M._reset()
 	pending = {}
 	dismissed_remote = {}
 	custom_active = nil
+	choice_float._reset()
 	current_call.id = nil
 	current_call.send = nil
 	if wrapper_installed and original_select then

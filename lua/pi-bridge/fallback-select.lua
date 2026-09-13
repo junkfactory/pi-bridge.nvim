@@ -6,6 +6,13 @@
 -- remote caller can close it. To stay usable on stock installs, we
 -- ship our own minimal float for the approval prompt.
 --
+-- The float mechanics (scratch buffer, centered float, keymaps that
+-- close-then-respond, prior-window restore, stale-window pruning) are
+-- shared with the UI prompt mirror's stock-picker float via
+-- `choice_float.lua`; this module owns the approval-specific content:
+-- the prompt text, the y/a/n keymap spec, and the `approval_response`
+-- message construction.
+--
 -- Lifecycle:
 --   show(req, send)            open float, install buffer-local maps;
 --                              user choice calls send_response then close()
@@ -13,25 +20,32 @@
 --   close_silent(reason_msg)   dismiss and echo `pi-bridge: <reason_msg>`
 --                              (used by the pi-disconnect path)
 --
--- Focus:
---   The float is entered on open so buffer-local maps fire. The prior
---   window is captured and restored on close when still valid.
---
 -- Concurrency:
 --   Only one float may be open at a time (defensive; pi serializes
 --   approval_request but a stale request could race the wrapper path).
 
 local log = require("pi-bridge.log")
+local choice_float = require("pi-bridge.choice_float")
 
 local M = {}
 
--- Module state: nil when no float is open.
-local state = nil
+-- Owner slot in choice_float. Kept distinct from the mirror's slot so
+-- an approval float and a mirror float can coexist.
+local OWNER = "approval"
 
 -- Visual styling: modest width, centered-ish, single border. Width
 -- sized for the longest label (~50 chars) plus padding.
 local WIN_WIDTH = 52
 local WIN_HEIGHT = 6 -- prompt + blank + 3 choices
+
+-- Labels mirror approval.lua's CHOICES. The y item avoids the letters
+-- 'a'/'n' (and n avoids 'a'/'y') so fuzzy pickers that filter as you
+-- type can only match each key to its own item — see approval.lua.
+local CHOICE_LINES = {
+	"y — yes to this edit",
+	"a — approve all edits to this file (this session)",
+	"n — reject this edit",
+}
 
 local function build_prompt(req)
 	local prompt = "approve edit: " .. (req.path or "")
@@ -56,63 +70,6 @@ local function build_prompt(req)
 	return prompt
 end
 
-local function restore_prior_window(prev)
-	if prev and vim.api.nvim_win_is_valid(prev) then
-		pcall(vim.api.nvim_set_current_win, prev)
-	end
-end
-
--- Drop the state handle if the float's window was closed behind our
--- back (:q on the float, :only, a window-management plugin). The
--- scratch buffer is wiped automatically via bufhidden; without this
--- the stale handle would make is_open() lie and the double-open guard
--- in show() would silently swallow every future approval request.
--- Must run in a UI-safe context (nvim_win_is_valid raises E5560 in
--- fast events).
-local function prune_stale()
-	if not state then return false end
-	if not vim.api.nvim_win_is_valid(state.win) then
-		state = nil
-		return false
-	end
-	return true
-end
-
-function M.close()
-	if not state then return end
-	local win = state.win
-	local buf = state.buf
-	local prev = state.prev_win
-	-- Teardown first, state last: if an API call raises (e.g. E5560 when
-	-- called from a fast event), the keymaps must stay live and the
-	-- open-state must stay consistent so a retry can still close it.
-	if win and vim.api.nvim_win_is_valid(win) then
-		pcall(vim.api.nvim_win_close, win, true)
-	end
-	if buf and vim.api.nvim_buf_is_valid(buf) then
-		pcall(vim.api.nvim_buf_delete, buf, { force = true })
-	end
-	state = nil
-	restore_prior_window(prev)
-	log.debug("fallback-select: closed")
-end
-
-function M.close_silent(reason_msg)
-	if not state then return end
-	log.info("fallback-select: dismissed: " .. tostring(reason_msg))
-	M.close()
-	vim.notify("pi-bridge: " .. tostring(reason_msg), vim.log.levels.WARN)
-end
-
-function M.is_open()
-	return prune_stale()
-end
-
-function M.get_pending_id()
-	if not state then return nil end
-	return state.id
-end
-
 local function send_response(send, id, decision)
 	if type(send) ~= "function" then return end
 	local ok, err = pcall(send, {
@@ -125,36 +82,23 @@ local function send_response(send, id, decision)
 	end
 end
 
-local function respond(decision)
-	if not M.is_open() then return end
-	local id = state.id
-	local send = state.send
-	-- Close first so the user sees the float disappear on answer; then
-	-- send. Order matches the wrapper path in approval.lua.
-	M.close()
-	send_response(send, id, decision)
+-- Public API (delegates to choice_float; signature-compatible with the
+-- pre-refactor module so approval.lua and its tests are unchanged).
+
+function M.close()
+	choice_float.close(OWNER)
 end
 
-local function install_keymaps(buf, send)
-	local function map(key, decision)
-		vim.keymap.set("n", key, function()
-			respond(decision)
-		end, { buffer = buf, nowait = true, silent = true })
-	end
-	map("y", "yes")
-	map("a", "all")
-	map("n", "no")
-	-- Esc and <C-c> dismiss-as-reject (same semantics as vim.ui.select).
-	vim.keymap.set("n", "<Esc>", function()
-		respond("no")
-	end, { buffer = buf, nowait = true, silent = true })
-	vim.keymap.set("n", "<C-c>", function()
-		respond("no")
-	end, { buffer = buf, nowait = true, silent = true })
-	-- Any other key: do nothing (avoid buffer edits).
-	vim.keymap.set("n", "<Plug>(pi-bridge-fallback-noop)", function() end, {
-		buffer = buf,
-	})
+function M.close_silent(reason_msg)
+	choice_float.close_silent(OWNER, reason_msg)
+end
+
+function M.is_open()
+	return choice_float.is_open(OWNER)
+end
+
+function M.get_pending_id()
+	return choice_float.get_id(OWNER)
 end
 
 function M.show(req, send)
@@ -175,56 +119,36 @@ function M.show(req, send)
 	end
 
 	local prompt = build_prompt(req)
-
-	local buf = vim.api.nvim_create_buf(false, true)
-	-- scratch + listed=false so :ls doesn't show it; buftype=nofile.
-	vim.bo[buf].bufhidden = "wipe"
-	vim.bo[buf].swapfile = false
-	-- Labels mirror approval.lua's CHOICES. The y item avoids the letters
-	-- 'a'/'n' (and n avoids 'a'/'y') so fuzzy pickers that filter as you
-	-- type can only match each key to its own item — see approval.lua.
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-		prompt,
-		"",
-		"y — yes to this edit",
-		"a — approve all edits to this file (this session)",
-		"n — reject this edit",
-	})
-
-	-- Center the float on the editor screen.
-	local total_lines = vim.o.lines
-	local total_cols = vim.o.columns
-	local row = math.max(0, math.floor((total_lines - WIN_HEIGHT) / 2) - 1)
-	local col = math.max(0, math.floor((total_cols - WIN_WIDTH) / 2))
-
-	local prev_win = vim.api.nvim_get_current_win()
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = "editor",
+	local opened = choice_float.open({
+		owner = OWNER,
+		id = id,
+		title = " pi approval ",
 		width = WIN_WIDTH,
 		height = WIN_HEIGHT,
-		row = row,
-		col = col,
-		style = "minimal",
-		border = "rounded",
-		title = " pi approval ",
-		title_pos = "center",
+		lines = vim.list_extend({ prompt, "" }, CHOICE_LINES),
+		-- Esc and <C-c> dismiss-as-reject (same semantics as
+		-- vim.ui.select).
+		keys = {
+			{ key = "y", value = "yes" },
+			{ key = "a", value = "all" },
+			{ key = "n", value = "no" },
+			{ key = "<Esc>", value = "no" },
+			{ key = "<C-c>", value = "no" },
+		},
+		on_choice = function(decision)
+			-- choice_float closes before calling on_choice, matching the
+			-- wrapper path's close-then-send order in approval.lua.
+			send_response(send, id, decision)
+		end,
 	})
-
-	state = {
-		win = win,
-		buf = buf,
-		id = id,
-		send = send,
-		prev_win = prev_win,
-	}
-
-	install_keymaps(buf, send)
-	log.info("fallback-select: opened for " .. id)
+	if opened then
+		log.info("fallback-select: opened for " .. id)
+	end
 end
 
 -- Test-only: clear module state. Not part of the public API.
 function M._reset()
-	state = nil
+	choice_float._reset()
 end
 
 return M
