@@ -27,13 +27,38 @@ vim.opt.backup = false
 vim.opt.undofile = false
 
 -- Setup pi-bridge with test-friendly defaults
-require("pi-bridge").setup({
+local setup_opts = {
   auto_launch = false, -- don't auto-launch pi in test harness
   log_level = "debug",
   keymaps = {
     prompt = "<leader>ai",
   },
-})
+}
+
+-- Generic env-override convention: any env var named like a snake_case
+-- option identifier is coerced ("true"/"false" → boolean, numeric
+-- strings → number) and passed into setup as an override, e.g.:
+--   ui_prompt_mirror=false ./scripts/test-nvim.sh
+--   auto_launch=true ./scripts/test-nvim.sh
+-- Shell-standard vars are uppercase, so they never match the pattern.
+for key, value in pairs(vim.env) do
+  if key:match("^[a-z][a-z0-9_]*$") then
+    local v = value
+    if v == "true" then
+      v = true
+    elseif v == "false" then
+      v = false
+    else
+      local n = tonumber(v)
+      if n ~= nil then
+        v = n
+      end
+    end
+    setup_opts[key] = v
+  end
+end
+
+require("pi-bridge").setup(setup_opts)
 
 -- Print status
 vim.api.nvim_create_autocmd("VimEnter", {
