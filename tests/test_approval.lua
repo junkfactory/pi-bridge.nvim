@@ -423,7 +423,7 @@ T["approval"]["wrapper path: user choice still sends the decision"] = function()
 		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
 	]])
 	child.lua(make_request("wrap-2"))
-	child.lua("_G._plugin_on_choice({ label = 'y — approve this edit', decision = 'yes' })")
+	child.lua("_G._plugin_on_choice({ label = 'y — yes to this edit', decision = 'yes' })")
 	local sent = messages()
 	expect.equality(#sent, 2)
 	expect.equality(sent[2].type, "approval_response")

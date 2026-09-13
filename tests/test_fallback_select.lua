@@ -45,7 +45,7 @@ T["fallback-select"]["show renders the prompt and three choices"] = function()
 	lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(0), 0, -1, false)")
 	expect.equality(#lines, 5)
 	expect.equality(lines[1], "approve edit: /tmp/example.lua")
-	expect.equality(lines[3], "y — approve this edit")
+	expect.equality(lines[3], "y — yes to this edit")
 	expect.equality(lines[4], "a — approve all edits to this file (this session)")
 	expect.equality(lines[5], "n — reject this edit")
 end

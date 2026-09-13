@@ -247,8 +247,13 @@ local function run_plugin(req)
 		end
 	end
 
+	-- Label choice matters: snacks.picker (and other fuzzy pickers)
+	-- filter items as the user types. The y item must not contain the
+	-- letters 'a' or 'n' anywhere, and the n item must not contain 'a'
+	-- or 'y', so typing a key fuzzy-matches only its own item (typing
+	-- 'a' used to select y because both items contained "approve").
 	local CHOICES = {
-		{ label = "y — approve this edit", decision = "yes" },
+		{ label = "y — yes to this edit", decision = "yes" },
 		{ label = "a — approve all edits to this file (this session)", decision = "all" },
 		{ label = "n — reject this edit", decision = "no" },
 	}

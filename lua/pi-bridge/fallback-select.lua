@@ -180,10 +180,13 @@ function M.show(req, send)
 	-- scratch + listed=false so :ls doesn't show it; buftype=nofile.
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].swapfile = false
+	-- Labels mirror approval.lua's CHOICES. The y item avoids the letters
+	-- 'a'/'n' (and n avoids 'a'/'y') so fuzzy pickers that filter as you
+	-- type can only match each key to its own item — see approval.lua.
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
 		prompt,
 		"",
-		"y — approve this edit",
+		"y — yes to this edit",
 		"a — approve all edits to this file (this session)",
 		"n — reject this edit",
 	})
