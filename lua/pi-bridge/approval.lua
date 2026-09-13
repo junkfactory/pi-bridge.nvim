@@ -33,8 +33,13 @@
 --   The previous design relied on `vim.ui.select` being non-closable
 --   (a stock inputlist). With the wrapper path the picker CAN be
 --   closed, so we install per-id dismiss handles and call them here
---   when pi broadcasts `approval_resolved`. The fallback float owns
---   its own close. No response is sent in either case.
+--   when pi broadcasts `approval_resolved`. Some pickers return a
+--   dismissable instance from vim.ui.select (snacks.picker.select
+--   returns the picker object) — that return value is the precise
+--   handle and is tried first; dressing's cancel and a snacks
+--   `picker.get({ source = "select" })` sweep are fallbacks. The
+--   fallback float owns its own close. No response is sent in either
+--   case.
 --
 --   Why `schedule_ui` (defer when `vim.in_fast_event()`):
 --   Dispatch handlers run from the socket's `pipe:read_start` callback,
@@ -181,29 +186,38 @@ local function install_wrapper()
 			on_choice(choice)
 		end
 
+		-- Some pickers return a dismissable instance (snacks.picker.select
+		-- returns the picker object); others return nothing (dressing). The
+		-- dismiss handle is installed BEFORE the call so a synchronous
+		-- on_choice(nil) can't race it, and `ret` is filled in after.
+		local ret
 		pending[id] = {
 			dismiss = function()
 				if dismissed_remote[id] then return end
 				dismissed_remote[id] = true
 				log.info("approval: remote dismiss for " .. tostring(id))
-				-- Best-effort: ask known plugins to close their picker.
-				-- The eventual on_choice(nil) is intercepted by
-				-- dismissed_remote above, so no response is sent.
+				-- Precise handle: the instance the picker returned us.
+				if type(ret) == "table" and type(ret.close) == "function" then
+					pcall(ret.close, ret)
+					return
+				end
+				-- Best-effort fallbacks for pickers that return nothing.
 				pcall(function()
 					local m = require("dressing.select.builtin")
 					if m and m.cancel then m.cancel() end
 				end)
 				pcall(function()
 					local s = require("snacks")
-					if s and s.picker and s.picker.current then
-						local p = s.picker.current()
-						if p and p.close then p:close() end
+					if s and s.picker and s.picker.get then
+						for _, p in ipairs(s.picker.get({ source = "select" })) do
+							if p and p.close then p:close() end
+						end
 					end
 				end)
 			end,
 		}
 
-		call_through(items, opts, wrapped_on_choice)
+		ret = call_through(items, opts, wrapped_on_choice)
 	end
 
 	vim.ui.select = wrapper

@@ -360,6 +360,57 @@ T["approval"]["wrapper path: resolve(id) dismisses without sending a response"] 
 	expect.equality(#messages(), 1)
 end
 
+T["approval"]["wrapper dismiss closes a picker instance returned by the plugin select"] = function()
+	-- snacks.picker.select returns the live picker object from
+	-- Snacks.picker.pick — that return value is the precise dismiss
+	-- handle and must be closed on resolve().
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = 0
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_on_choice = on_choice
+			return { close = function() _G._closed = _G._closed + 1 end }
+		end
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("wrap-ret"))
+	child.lua("approval.resolve('wrap-ret')")
+	expect.equality(child.lua("return _G._closed"), 1)
+	-- No response sent (the eventual on_choice(nil) is intercepted).
+	child.lua("_G._plugin_on_choice(nil)")
+	expect.equality(#messages(), 1)
+end
+
+T["approval"]["wrapper dismiss falls back to snacks.picker.get when the select returns nothing"] = function()
+	-- Regression: the old code probed a nonexistent snacks.picker.current
+	-- and silently skipped the close. The fallback must sweep the
+	-- source="select" pickers via snacks.picker.get.
+	child.lua([[
+		package.loaded.snacks = {
+			picker = {
+				get = function(opts)
+					_G._snacks_get_opts = opts
+					return { { close = function() _G._snacks_closed = (_G._snacks_closed or 0) + 1 end } }
+				end,
+			},
+		}
+		approval.setup({ edit_approval_prompt = true })
+		local stock = vim.ui.select
+		vim.ui.select = function(items, opts, on_choice)
+			_G._plugin_on_choice = on_choice
+		end
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("wrap-snacks"))
+	child.lua("approval.resolve('wrap-snacks')")
+	expect.equality(child.lua("return _G._snacks_closed"), 1)
+	local get_opts = child.lua("return _G._snacks_get_opts")
+	expect.equality(get_opts.source, "select")
+end
+
 T["approval"]["wrapper path: user choice still sends the decision"] = function()
 	child.lua([[
 		approval.setup({ edit_approval_prompt = true })
