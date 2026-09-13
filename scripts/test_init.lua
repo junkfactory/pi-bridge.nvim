@@ -41,7 +41,9 @@ local setup_opts = {
 --   ui_prompt_mirror=false ./scripts/test-nvim.sh
 --   auto_launch=true ./scripts/test-nvim.sh
 -- Shell-standard vars are uppercase, so they never match the pattern.
-for key, value in pairs(vim.env) do
+-- NOTE: vim.fn.environ(), not pairs(vim.env) — the latter does not
+-- enumerate externally-set vars (found live: opt silently ignored).
+for key, value in pairs(vim.fn.environ()) do
   if key:match("^[a-z][a-z0-9_]*$") then
     local v = value
     if v == "true" then
