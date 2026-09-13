@@ -75,6 +75,53 @@ local function check_approval_prompt()
 	end
 end
 
+-- UI prompt mirror opt
+--
+-- The mirror module is always loaded by setup() (same as the approval
+-- module above), but the runtime opt only takes effect when init.lua's
+-- setup() has been called. health may run before setup, so read the
+-- opt from init.lua's exported config when available, and fall back to
+-- `mirror.is_enabled()` (which returns the module's last setup state,
+-- default-on).
+--
+-- Module identity gotcha: `require("pi-bridge")` and
+-- `require("pi-bridge.init")` load `lua/pi-bridge/init.lua` twice
+-- (different cache keys), each with its own `config` local. Use the
+-- same require() shape that init.lua itself uses internally — `require
+-- ("pi-bridge")` — so we read the user-facing module's config, not a
+-- shadow copy with config=nil.
+
+local function check_ui_prompt_mirror()
+	local opt_enabled = nil
+	local ok_init, init_mod = pcall(require, "pi-bridge")
+	if ok_init and type(init_mod.get_config) == "function" then
+		local cfg = init_mod.get_config()
+		if cfg and cfg.ui_prompt_mirror ~= nil then
+			opt_enabled = cfg.ui_prompt_mirror
+		end
+	end
+
+	local ok_mirror, mirror_mod = pcall(require, "pi-bridge.prompt_mirror")
+	if not ok_mirror then
+		vim.health.warn("UI prompt mirror module unavailable")
+		return
+	end
+
+	if opt_enabled == false then
+		vim.health.info(
+			"UI prompt mirror: disabled via `ui_prompt_mirror = false` "
+				.. "(ext side keeps wrapping; nvim never sends mirror_ready)"
+		)
+		return
+	end
+
+	-- Either explicit true, or no setup() yet (opt defaults to true
+	-- in the module's setup() — and even before setup, the protocol
+	-- handlers are wired once setup runs). Report OK with the
+	-- practical detail.
+	vim.health.ok("UI prompt mirror: enabled (ui_prompt_mirror = true)")
+end
+
 -- Probe a single socket path's availability, mirroring resolve.lua's
 -- internal probe but only exposing what health needs: file presence
 -- and whether the kernel accepts the connection. Health must never
@@ -201,6 +248,7 @@ function M.check()
 	check_extension()
 	check_autochdir()
 	check_approval_prompt()
+	check_ui_prompt_mirror()
 	check_socket_status()
 	check_log_file()
 end

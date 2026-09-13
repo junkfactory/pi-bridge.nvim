@@ -504,4 +504,80 @@ T["health"]["reports approval prompt support before setup (module-only check)"] 
 	expect.equality(saw, true)
 end
 
+-- UI prompt mirror: health reports the runtime opt state.
+--
+-- Default (setup with no opt): mirror enabled, line is OK.
+-- Explicit opt-off: info line explains the disable.
+
+T["health"]["reports UI prompt mirror enabled by default after setup"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local saw = false
+	for _, entry in ipairs(result) do
+		if entry.kind == "ok" and entry.msg and entry.msg:find("UI prompt mirror") and entry.msg:find("enabled") then
+			saw = true
+			break
+		end
+	end
+	expect.equality(saw, true)
+end
+
+T["health"]["reports UI prompt mirror disabled when opt off"] = function()
+	local result = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', ui_prompt_mirror = false })
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local saw = false
+	for _, entry in ipairs(result) do
+		if entry.kind == "info" and entry.msg and entry.msg:find("UI prompt mirror") and entry.msg:find("disabled") then
+			saw = true
+			break
+		end
+	end
+	expect.equality(saw, true)
+end
+
+T["health"]["reports UI prompt mirror enabled before setup (no opt known yet)"] = function()
+	local result = child.lua([[
+		_G.health_output = {}
+		vim.health = {
+			start = function(name) end,
+			ok = function(msg) table.insert(_G.health_output, { kind = 'ok', msg = msg }) end,
+			warn = function(msg, adv) table.insert(_G.health_output, { kind = 'warn', msg = msg }) end,
+			error = function(msg, adv) table.insert(_G.health_output, { kind = 'error', msg = msg }) end,
+			info = function(msg) table.insert(_G.health_output, { kind = 'info', msg = msg }) end,
+		}
+		require('pi-bridge.health').check()
+		return _G.health_output
+	]])
+	local saw = false
+	for _, entry in ipairs(result) do
+		if entry.kind == "ok" and entry.msg and entry.msg:find("UI prompt mirror") then
+			saw = true
+			break
+		end
+	end
+	expect.equality(saw, true)
+end
+
 return T

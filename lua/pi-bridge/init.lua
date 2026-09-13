@@ -7,6 +7,7 @@ local ui = require("pi-bridge.ui")
 local placeholders = require("pi-bridge.placeholders")
 local resolve = require("pi-bridge.resolve")
 local approval = require("pi-bridge.approval")
+local mirror = require("pi-bridge.prompt_mirror")
 
 local M = {}
 
@@ -29,6 +30,13 @@ local defaults = {
 	-- its own TUI overlay after 1s because no ack arrives). Protocol is
 	-- always wired — this is the runtime opt-out, not a protocol switch.
 	edit_approval_prompt = true,
+	-- Mirror any pi extension's blocking prompt (select / confirm /
+	-- custom `ctx.ui.custom` components) into Neovim during nvim-
+	-- originated turns. Sends `mirror_ready` on connect so the ext side
+	-- knows to intercept prompts; disabled means the ext's wrappers
+	-- pass through (see pi-bridge.ext's `PI_BRIDGE_UI_PROMPT_MIRROR=0`
+	-- kill switch for the other direction).
+	ui_prompt_mirror = true,
 }
 
 local function validate_config(cfg)
@@ -64,6 +72,9 @@ local function validate_config(cfg)
 	if cfg.edit_approval_prompt ~= nil and type(cfg.edit_approval_prompt) ~= "boolean" then
 		return "edit_approval_prompt must be a boolean"
 	end
+	if cfg.ui_prompt_mirror ~= nil and type(cfg.ui_prompt_mirror) ~= "boolean" then
+		return "ui_prompt_mirror must be a boolean"
+	end
 	if cfg.notify ~= nil and type(cfg.notify) ~= "boolean" then
 		return "notify must be a boolean"
 	end
@@ -83,8 +94,9 @@ local function ensure_connection(cb)
 	-- Notify once per remote disconnect; never auto-launch from here.
 	-- Suppressed during local VimLeavePre cleanup so users do not see a
 	-- spurious message when they quit Neovim normally. Also routes to
-	-- approval.on_remote_disconnect() so a mid-prompt pi exit closes
-	-- any open approval picker with a "pi disconnected" message.
+	-- approval.on_remote_disconnect() and mirror.dismiss_all() so a
+	-- mid-prompt pi exit closes any open surface with a "pi
+	-- disconnected" message.
 	local on_disconnect = function()
 		vim.schedule(function()
 			vim.notify(
@@ -92,14 +104,29 @@ local function ensure_connection(cb)
 				vim.log.levels.WARN
 			)
 			pcall(approval.on_remote_disconnect)
+			pcall(mirror.dismiss_all)
 		end)
 		log.info("remote disconnect from pi session")
+	end
+
+	-- Announce mirror readiness over the established connection. Called
+	-- once per successful connect (persistent + post-launch). The mirror
+	-- module is the authority on whether to send — `is_enabled` checks
+	-- the runtime opt. We send via `socket.send` (the same plumbing the
+	-- gate's `approval_ack` uses), NOT via the on_message callback,
+	-- because on_message is the inbound side. mirror.send_ready is a
+	-- pcall-guarded no-op when no send fn is reachable.
+	local function announce_mirror_ready()
+		if mirror.is_enabled() then
+			mirror.send_ready(socket.send)
+		end
 	end
 
 	resolve.find_socket(function(path)
 		if path then
 			log.info("connecting to " .. path)
 			if socket.connect(path, on_message, on_disconnect) then
+				announce_mirror_ready()
 				cb(true)
 				return
 			end
@@ -126,6 +153,7 @@ local function ensure_connection(cb)
 			resolve.clear_cache()
 			if socket.connect(cwd_path, on_message, on_disconnect) then
 				log.info("connected after launch")
+				announce_mirror_ready()
 				cb(true)
 			else
 				log.warn("still cannot connect after launch")
@@ -229,6 +257,22 @@ function M.setup(opts)
 	end)
 	dispatch.register("approval_resolved", function(msg)
 		approval.resolve(msg.id)
+	end)
+
+	-- UI prompt mirror: any pi extension's blocking prompt (select /
+	-- confirm / custom) is mirrored into Neovim during nvim-originated
+	-- turns. We always wire these handlers — mirror.setup() below
+	-- stores the runtime opt; the module decides per-request whether
+	-- to open a surface. `mirror_ready` is announced by the connect
+	-- path above (see announce_mirror_ready). The disconnect handler
+	-- routes to mirror.dismiss_all() so a mid-prompt pi exit closes
+	-- any open mirror float / picker with a "pi disconnected" notice.
+	mirror.setup(config)
+	dispatch.register("ui_prompt_request", function(msg)
+		mirror._handle_request(msg, socket.send)
+	end)
+	dispatch.register("ui_prompt_resolved", function(msg)
+		mirror._handle_resolved(msg)
 	end)
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {

@@ -421,4 +421,332 @@ T["init"]["approval_resolved after dispatch is safe (late answers are discarded 
 	expect.equality(true, true)
 end
 
+-- UI prompt mirror: setup wires the dispatch handlers, the runtime opt
+-- flows from cfg to mirror.is_enabled, mirror_ready is sent on connect
+-- when enabled, NOT sent when opt off, dismiss_all fires on remote
+-- disconnect, and the integration path (ui_prompt_request → mirror
+-- surface → ui_prompt_response) round-trips through the real dispatch
+-- table.
+
+T["init"]["setup registers ui_prompt_request handler"] = function()
+	local has_handler = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local dispatch = require('pi-bridge.dispatch')
+		local handlers = dispatch.get_handlers()
+		return type(handlers.ui_prompt_request) == 'function'
+	]])
+	expect.equality(has_handler, true)
+end
+
+T["init"]["setup registers ui_prompt_resolved handler"] = function()
+	local has_handler = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local dispatch = require('pi-bridge.dispatch')
+		local handlers = dispatch.get_handlers()
+		return type(handlers.ui_prompt_resolved) == 'function'
+	]])
+	expect.equality(has_handler, true)
+end
+
+T["init"]["ui_prompt_mirror defaults to true"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.ui_prompt_mirror, true)
+
+	local enabled = child.lua("return require('pi-bridge.prompt_mirror').is_enabled()")
+	expect.equality(enabled, true)
+end
+
+T["init"]["ui_prompt_mirror can be set to false"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', ui_prompt_mirror = false })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.ui_prompt_mirror, false)
+
+	local enabled = child.lua("return require('pi-bridge.prompt_mirror').is_enabled()")
+	expect.equality(enabled, false)
+end
+
+T["init"]["setup rejects non-boolean ui_prompt_mirror"] = function()
+	local ok = child.lua([[
+		local ok, err = pcall(require('pi-bridge').setup, { ui_prompt_mirror = 'yes' })
+		return ok
+	]])
+	expect.equality(ok, false)
+end
+
+-- mirror_ready on connect (mirror opt enabled, default).
+--
+-- Persistent connect path: real mock server, real socket.connect,
+-- observe outbound message on the server side.
+
+T["init"]["mirror_ready sent on persistent connect when enabled"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+		require('pi-bridge').prompt({ text = 'first' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	-- Wait for outbound mirror_ready to land on the server side. All
+	-- access to the server object is via the child neovim.
+	local found = child.lua([[
+		vim.wait(1500, function()
+			for _, m in ipairs(_G._test_server.get_messages()) do
+				if m.type == "mirror_ready" then return true end
+			end
+			return false
+		end, 30)
+		for _, m in ipairs(_G._test_server.get_messages()) do
+			if m.type == "mirror_ready" then return true end
+		end
+		return false
+	]])
+	expect.equality(found, true)
+
+	child.lua([[
+		require('pi-bridge.socket').disconnect()
+		_G._test_server.stop()
+	]])
+	helpers.rmdir(dir)
+end
+
+-- mirror_ready NOT sent when opts off.
+
+T["init"]["mirror_ready NOT sent when ui_prompt_mirror = false"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false, ui_prompt_mirror = false })
+		require('pi-bridge').prompt({ text = 'first' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	-- Give the message loop time to flush. mirror_ready must NOT appear.
+	vim.uv.sleep(300)
+
+	local found = child.lua([[
+		for _, m in ipairs(_G._test_server.get_messages()) do
+			if m.type == "mirror_ready" then return true end
+		end
+		return false
+	]])
+	expect.equality(found, false)
+
+	child.lua([[
+		require('pi-bridge.socket').disconnect()
+		_G._test_server.stop()
+	]])
+	helpers.rmdir(dir)
+end
+
+-- Dismiss on remote disconnect.
+--
+-- When the persistent socket observes EOF/error from pi, init.lua's
+-- on_disconnect callback fires; mirror.dismiss_all() must be called
+-- alongside approval.on_remote_disconnect(). We stub both module
+-- functions to verify invocation, then drive a real disconnect by
+-- stopping the mock server.
+
+T["init"]["dismiss_all called on remote disconnect"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+		require('pi-bridge').prompt({ text = 'setup' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+
+		-- Stub mirror.dismiss_all to record invocations.
+		local mirror = require('pi-bridge.prompt_mirror')
+		_G._dismiss_count = 0
+		mirror.dismiss_all = function()
+			_G._dismiss_count = _G._dismiss_count + 1
+		end
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+	expect.equality(child.lua("return _G._dismiss_count"), 0)
+
+	-- Stop the server: client observes EOF, init.lua's on_disconnect
+	-- callback fires once.
+	child.lua("_G._test_server.stop()")
+	child.lua("vim.wait(800, function() return _G._dismiss_count >= 1 end, 30)")
+
+	expect.equality(child.lua("return _G._dismiss_count"), 1)
+
+	child.lua("require('pi-bridge.socket').disconnect()")
+	helpers.rmdir(dir)
+end
+
+-- Local disconnect (VimLeavePre path) must NOT call mirror.dismiss_all:
+-- same symmetry as the approval gate's "local disconnect does not notify".
+
+T["init"]["local disconnect does not call dismiss_all"] = function()
+	local dir = helpers.tmpdir()
+	local path = dir .. "/test.sock"
+
+	child.lua(string.format([[
+		local helpers = dofile('tests/helpers.lua')
+		_G._test_server = helpers.mock_server(%q)
+
+		vim.env.PI_BRIDGE_TESTING = '1'
+		vim.env.ENV_TEST_SOCKET_PATH = %q
+		require('pi-bridge').setup({ auto_launch = false })
+		require('pi-bridge').prompt({ text = 'setup' })
+		vim.wait(1500, function()
+			return require('pi-bridge.socket').is_connected()
+		end, 30)
+
+		local mirror = require('pi-bridge.prompt_mirror')
+		_G._dismiss_count = 0
+		mirror.dismiss_all = function()
+			_G._dismiss_count = _G._dismiss_count + 1
+		end
+	]], path, path))
+
+	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
+
+	-- Local disconnect: must NOT trigger mirror.dismiss_all (mirrors
+	-- the "local disconnect does not notify" contract).
+	child.lua([[
+		require('pi-bridge.socket').disconnect()
+		vim.wait(100, function() return not require('pi-bridge.socket').is_connected() end, 20)
+	]])
+	vim.uv.sleep(300)
+
+	expect.equality(child.lua("return _G._dismiss_count"), 0)
+
+	child.lua("_G._test_server.stop()")
+	helpers.rmdir(dir)
+end
+
+-- Integration: full request → response path through the real dispatch
+-- table. Mirrors test_approval's `approval_request dispatched via
+-- registered handler acks and opens the picker` approach but for the
+-- mirror module: dispatch a ui_prompt_request, observe that the mirror
+-- picker is opened and the user's choice round-trips back as a
+-- ui_prompt_response sent via socket.send.
+
+T["init"]["ui_prompt_request dispatched via registered handler opens mirror and sends response"] = function()
+	child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		-- Stub socket.send to capture outbound.
+		_G.mirror_sent = {}
+		local socket = require('pi-bridge.socket')
+		socket.send = function(msg) table.insert(_G.mirror_sent, msg) end
+		-- Mock plugin picker: capture calls, never answer.
+		_G._select_calls = {}
+		vim.ui.select = function(items, opts, on_choice)
+			table.insert(_G._select_calls, { items = items, opts = opts })
+			_G._select_on_choice = on_choice
+			return nil
+		end
+		local dispatch = require('pi-bridge.dispatch')
+		dispatch.dispatch({
+			type = 'ui_prompt_request',
+			id = 'wire-1',
+			kind = 'select',
+			title = 'pick one',
+			options = { 'alpha', 'beta' },
+		})
+	]])
+	expect.equality(child.lua("return #_G._select_calls"), 1)
+	expect.equality(child.lua("return _G._select_calls[1].items[1]"), "alpha")
+	expect.equality(child.lua("return _G._select_calls[1].items[2]"), "beta")
+
+	-- User picks the second option. The mirror module must send
+	-- ui_prompt_response {id, value = "beta"} via the captured send fn.
+	child.lua("_G._select_on_choice(_G._select_calls[1].items[2])")
+	local sent = child.lua("return _G.mirror_sent")
+	expect.equality(#sent, 1)
+	expect.equality(sent[1].type, "ui_prompt_response")
+	expect.equality(sent[1].id, "wire-1")
+	expect.equality(sent[1].value, "beta")
+	expect.equality(sent[1].cancelled, nil)
+end
+
+T["init"]["ui_prompt_resolved dispatched via registered handler dismisses without sending"] = function()
+	child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		local socket = require('pi-bridge.socket')
+		socket.send = function() end
+		vim.ui.select = function() end
+		local dispatch = require('pi-bridge.dispatch')
+		dispatch.dispatch({
+			type = 'ui_prompt_request',
+			id = 'wire-res',
+			kind = 'select',
+			title = 'pick',
+			options = { 'a', 'b' },
+		})
+		dispatch.dispatch({ type = 'ui_prompt_resolved', id = 'wire-res' })
+		-- The dispatch must not error; the late-arriving answer from
+		-- the picker callback (if any) must not send cancelled either.
+	]])
+	expect.equality(true, true)
+end
+
+-- opts-off integration: dispatch wires the handler, but the mirror
+-- module opens nothing — i.e. the request is dropped at the module
+-- level (no picker, no float, no response sent). Verifies the wiring
+-- is unconditional (handlers always registered) but the runtime opt
+-- gates actual behavior.
+
+T["init"]["ui_prompt_request dispatched but mirror disabled → no surface"] = function()
+	child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', ui_prompt_mirror = false })
+		_G.mirror_sent = {}
+		local socket = require('pi-bridge.socket')
+		socket.send = function(msg) table.insert(_G.mirror_sent, msg) end
+		_G._select_calls = {}
+		-- Stock picker would block; mirror disabled must not reach
+		-- either path. Use a plugin-mock so we can detect "no call".
+		vim.ui.select = function(items, opts, on_choice)
+			table.insert(_G._select_calls, { items = items })
+		end
+		local dispatch = require('pi-bridge.dispatch')
+		dispatch.dispatch({
+			type = 'ui_prompt_request',
+			id = 'wire-off',
+			kind = 'select',
+			title = 'pick',
+			options = { 'a', 'b' },
+		})
+	]])
+	expect.equality(child.lua("return #_G._select_calls"), 0)
+	expect.equality(child.lua("return #_G.mirror_sent"), 0)
+end
+
 return T

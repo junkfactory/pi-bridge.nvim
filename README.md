@@ -206,6 +206,14 @@ require("pi-bridge").setup({
   -- own TUI overlay because no approval_ack arrives within 1s).
   edit_approval_prompt = true,
 
+  -- UI prompt mirror: mirror any pi extension's blocking prompt
+  -- (select / confirm / custom `ctx.ui.custom` components) into
+  -- Neovim during nvim-originated turns. Set false to opt out (the
+  -- ext side keeps wrapping, but nvim never sends mirror_ready so
+  -- every prompt stays in pi's TUI). See pi-bridge.ext's
+  -- PI_BRIDGE_UI_PROMPT_MIRROR env var for the other direction.
+  ui_prompt_mirror = true,
+
   -- Send/receive notifications: show a toast when pi starts/finishes
   -- working. Set false to silence (on base Neovim toasts require
   -- Enter to dismiss). Errors and disconnect warnings are always shown.
@@ -323,6 +331,43 @@ With this set, nvim never opens the picker or acks; pi's own prompt becomes the 
 ### Protocol pairing
 
 `approval_request`, `approval_resolved`, `approval_ack`, and `approval_response` are new NDJSON message types. Both `pi-bridge.nvim` and `pi-bridge.ext` must be tagged at the same version when this protocol is in use — see [Releasing](#releasing) for the paired-tag rule.
+
+## UI Prompt Mirror
+
+When a turn is started from Neovim (`<leader>ai`) and any pi extension raises a blocking prompt (`ctx.ui.select` / `ctx.ui.confirm` / a custom `ctx.ui.custom` component such as pi-permission-system's permission dialog), pi-bridge mirrors it into Neovim so the user can answer from either surface. First answer wins; the other cleans itself up.
+
+Turns typed directly into pi auto-pass-through (no mirror, no stall) — the mirror is origin-scoped exactly like the edit-approval gate.
+
+### Surfaces
+
+| Kind           | What appears in Neovim                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `select`       | `vim.ui.select` picker — **full original labels** as items, with a `format_item` that display-trims labels longer than 80 chars to `first 77 chars + "..."`. The picker returns the full untrimmed label, so the value sent back to pi is never truncated. Plugin pickers (dressing, snacks, fzf-lua, ...) work untouched. The stock `vim.ui.select` (which blocks in `inputlist()` and cannot be dismissed programmatically) is replaced by a minimal owned float with numbered keys `1..9` + `<Esc>`.                                                         |
+| `confirm`      | Same as `select`, folded in as a 2-option picker (`Yes` / `No`). Cancelled sends `cancelled: true` and the ext side resolves to `false` (matches pi's own RPC semantics).                                                                                                                                                                                                                                                                                                                                                                                       |
+| `custom`       | A floating window (`nvim_open_win`, `buftype=nofile`, `wrap`) sized to the longest ANSI-stripped line, displaying the rendered dialog text. A `getcharstr()` modal loop then forwards every key as `ui_prompt_response {id, key}`; the keys reach the pi-side component's own `handleInput()`, so the dialog's hotkeys (`y` / `s` / `b` / `n` / `r`) act on the dialog itself and the dialog's double-press confirm works normally. `<Esc>` closes the mirror float **only** — nothing is forwarded. `ui_prompt_resolved` closes the float and breaks the loop. |
+
+### Handshake
+
+`mirror_ready` is sent once per successful connect (persistent and post-launch). The ext side installs its wrappers onto `ctx.ui` only after receiving it; without it, every extension prompt goes straight to pi's TUI.
+
+The ready flag is cleared on socket disconnect (and a new `mirror_ready` is required on reconnect). On session boundaries (`session_start` / `session_before_switch` / `session_shutdown`) the ext side drops any open mirror surface; nvim simply no-ops on a stale id.
+
+### Disconnect
+
+- **nvim disconnects mid-prompt** → the pi-side surface **stays open** awaiting the user's answer; nvim never resolves the pending request
+- **pi disconnects mid-mirror** → nvim dismisses its picker/float with a `pi disconnected` message and sends no response (same as the edit-approval flow)
+
+### Disabling (ui_prompt_mirror)
+
+```lua
+require("pi-bridge").setup({ ui_prompt_mirror = false })
+```
+
+With this set, nvim never sends `mirror_ready`; the ext side's wrappers pass through, and every extension's prompt is answered in pi's TUI. The other direction is the ext env var `PI_BRIDGE_UI_PROMPT_MIRROR=0` (see [pi-bridge.ext Kill Switches](https://github.com/junkfactory/pi-bridge.ext#kill-switches)) — both kill switches are independent.
+
+### Mirror protocol pairing
+
+`mirror_ready`, `ui_prompt_request`, `ui_prompt_response`, and `ui_prompt_resolved` are new NDJSON message types. Both `pi-bridge.nvim` and `pi-bridge.ext` must be tagged at the same version when this protocol is in use — see [Releasing](#releasing) for the paired-tag rule.
 
 ## Logging
 
