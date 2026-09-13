@@ -20,6 +20,10 @@ local defaults = {
 	launch_cmd = { "pi" },
 	keymaps = { prompt = "<leader>ai" },
 	log_level = "info",
+	-- Show a toast when pi starts/finishes working (agent_start/agent_end).
+	-- Set false to silence — on base Neovim these require Enter to dismiss.
+	-- Errors and disconnect warnings are always shown.
+	notify = true,
 	-- When pi sends an approval_request, show a centered floating diff
 	-- prompt with y/a/n keys. Set to false to opt out (pi falls back to
 	-- its own TUI overlay after 1s because no ack arrives). Protocol is
@@ -59,6 +63,9 @@ local function validate_config(cfg)
 	end
 	if cfg.edit_approval_prompt ~= nil and type(cfg.edit_approval_prompt) ~= "boolean" then
 		return "edit_approval_prompt must be a boolean"
+	end
+	if cfg.notify ~= nil and type(cfg.notify) ~= "boolean" then
+		return "notify must be a boolean"
 	end
 	return nil
 end
@@ -216,6 +223,7 @@ function M.setup(opts)
 	-- also routes to approval.on_remote_disconnect() so a mid-prompt
 	-- pi exit closes the picker with a "pi disconnected" message.
 	approval.setup(config)
+	ui.notify_enabled = cfg.notify
 	dispatch.register("approval_request", function(msg)
 		approval.show(msg, socket.send)
 	end)

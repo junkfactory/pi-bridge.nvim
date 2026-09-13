@@ -205,6 +205,11 @@ require("pi-bridge").setup({
   -- renders in pi's TUI. Set false to opt out (pi falls back to its
   -- own TUI overlay because no approval_ack arrives within 1s).
   edit_approval_prompt = true,
+
+  -- Send/receive notifications: show a toast when pi starts/finishes
+  -- working. Set false to silence (on base Neovim toasts require
+  -- Enter to dismiss). Errors and disconnect warnings are always shown.
+  notify = true,
 })
 ```
 
