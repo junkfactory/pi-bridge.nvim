@@ -38,9 +38,10 @@
 --
 --   Why `schedule_ui` (defer when `vim.in_fast_event()`):
 --   Dispatch handlers run from the socket's `pipe:read_start` callback,
---   a libuv fast event in which nvim_* APIs raise E5560. show() defers
---   to the main loop in that case and runs directly otherwise, so
---   direct callers (tests) keep synchronous semantics.
+--   a libuv fast event in which nvim_* APIs raise E5560. Every entry
+--   point that touches the UI (show, resolve, on_remote_disconnect)
+--   defers to the main loop in that case and runs directly otherwise,
+--   so direct callers (tests) keep synchronous semantics.
 --
 --   Why capture `vim.ui.select` at `setup()` time:
 --   The captured function is only the wrapper path's call-through
@@ -62,6 +63,11 @@ local wrapper_installed = false
 -- Request state: only one request in flight at a time. pi serializes.
 local current_id = nil
 local current_send = nil
+
+-- UI-safe bodies of resolve()/on_remote_disconnect() — forward-declared
+-- because the public wrappers schedule them (see schedule_ui below).
+local resolve_sync
+local on_remote_disconnect_sync
 
 -- Per-request dismiss handles for the wrapper (plugin picker) path.
 -- Keyed by approval_request id so resolve() / on_remote_disconnect()
@@ -335,8 +341,16 @@ end
 
 -- Dismiss the picker for a request id without sending a response.
 -- Called when pi broadcasts `approval_resolved` (pi already answered).
+-- UI-safe: the dispatch handler runs in a fast event, and dismissal
+-- touches window APIs (E5560 there) — defer like show() does.
 function M.resolve(id)
 	if id == nil then return end
+	schedule_ui(function()
+		resolve_sync(id)
+	end)
+end
+
+function resolve_sync(id)
 	local handle = pending[id]
 	if handle and type(handle.dismiss) == "function" then
 		-- Wrapper path: trigger the plugin's cancel. The wrapper
@@ -357,6 +371,15 @@ end
 -- unaffected (those happen inside the picker callbacks before
 -- this fires).
 function M.on_remote_disconnect()
+	-- UI-safe for the same reason as resolve(): callers may invoke this
+	-- straight from the socket's fast event (init.lua schedules it too,
+	-- but the module must not rely on caller discipline).
+	schedule_ui(function()
+		on_remote_disconnect_sync()
+	end)
+end
+
+function on_remote_disconnect_sync()
 	-- One user-facing message for the disconnect, regardless of which
 	-- picker path is active. close() (not close_silent) for the fallback
 	-- float so the notify below is the only echo.

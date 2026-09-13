@@ -56,26 +56,44 @@ local function build_prompt(req)
 	return prompt
 end
 
-local function restore_prior_window()
-	if not state then return end
-	local prev = state.prev_win
+local function restore_prior_window(prev)
 	if prev and vim.api.nvim_win_is_valid(prev) then
 		pcall(vim.api.nvim_set_current_win, prev)
 	end
+end
+
+-- Drop the state handle if the float's window was closed behind our
+-- back (:q on the float, :only, a window-management plugin). The
+-- scratch buffer is wiped automatically via bufhidden; without this
+-- the stale handle would make is_open() lie and the double-open guard
+-- in show() would silently swallow every future approval request.
+-- Must run in a UI-safe context (nvim_win_is_valid raises E5560 in
+-- fast events).
+local function prune_stale()
+	if not state then return false end
+	if not vim.api.nvim_win_is_valid(state.win) then
+		state = nil
+		return false
+	end
+	return true
 end
 
 function M.close()
 	if not state then return end
 	local win = state.win
 	local buf = state.buf
-	state = nil
+	local prev = state.prev_win
+	-- Teardown first, state last: if an API call raises (e.g. E5560 when
+	-- called from a fast event), the keymaps must stay live and the
+	-- open-state must stay consistent so a retry can still close it.
 	if win and vim.api.nvim_win_is_valid(win) then
 		pcall(vim.api.nvim_win_close, win, true)
 	end
 	if buf and vim.api.nvim_buf_is_valid(buf) then
 		pcall(vim.api.nvim_buf_delete, buf, { force = true })
 	end
-	restore_prior_window()
+	state = nil
+	restore_prior_window(prev)
 	log.debug("fallback-select: closed")
 end
 
@@ -87,7 +105,7 @@ function M.close_silent(reason_msg)
 end
 
 function M.is_open()
-	return state ~= nil
+	return prune_stale()
 end
 
 function M.get_pending_id()
@@ -108,7 +126,7 @@ local function send_response(send, id, decision)
 end
 
 local function respond(decision)
-	if not state then return end
+	if not M.is_open() then return end
 	local id = state.id
 	local send = state.send
 	-- Close first so the user sees the float disappear on answer; then
@@ -140,7 +158,9 @@ local function install_keymaps(buf, send)
 end
 
 function M.show(req, send)
-	if state then
+	-- is_open() prunes a stale handle left by an external window close,
+	-- so a poisoned state can't swallow the next request.
+	if M.is_open() then
 		log.warn("fallback-select: already open, ignoring request " .. tostring(req and req.id))
 		return
 	end

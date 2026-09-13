@@ -133,6 +133,25 @@ T["fallback-select"]["second show while open is ignored"] = function()
 	expect.equality(sent[1].id, "fs-dup1")
 end
 
+T["fallback-select"]["external window close self-heals stale state"] = function()
+	-- :q on the float closes the window behind the module's back; the
+	-- stale handle must not poison the double-open guard (which used to
+	-- silently swallow every later approval_request until nvim restart).
+	child.lua(string.format(SHOW, "fs-extclose"))
+	expect.equality(child.lua("return fsel.is_open()"), true)
+	child.lua([[
+		for _, w in ipairs(vim.api.nvim_list_wins()) do
+			if vim.api.nvim_win_get_config(w).relative ~= "" then
+				vim.api.nvim_win_close(w, true)
+			end
+		end
+	]])
+	expect.equality(child.lua("return fsel.is_open()"), false)
+	-- A follow-up request must still open a picker.
+	child.lua(string.format(SHOW, "fs-after-extclose"))
+	expect.equality(child.lua("return fsel.is_open()"), true)
+end
+
 T["fallback-select"]["missing id is dropped without opening"] = function()
 	child.lua("fsel.show({ type='approval_request', tool='edit', path='/tmp/x.lua' }, fake_send)")
 	expect.equality(child.lua("return fsel.is_open()"), false)

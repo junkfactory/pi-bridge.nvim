@@ -288,6 +288,52 @@ T["approval"]["resolve(id) dismisses the fallback float without responding"] = f
 	expect.equality(#messages(), 1) -- ack only; no response sent
 end
 
+T["approval"]["resolve from a fast event dismisses the float (E5560 regression)"] = function()
+	-- The socket dispatches handlers from libuv callbacks — fast events
+	-- in which nvim_* APIs raise E5560. resolve() must defer to the main
+	-- loop instead of crashing mid-close (which used to leave the float
+	-- visible with dead keymaps and a stale current_id that swallowed
+	-- every later approval_request).
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	child.lua(make_request("fast-1"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+	child.lua([[
+		local timer = vim.uv.new_timer()
+		timer:start(0, 0, function()
+			approval.resolve('fast-1')
+		end)
+	]])
+	child.lua("vim.wait(2000, function() return not require('pi-bridge.fallback-select').is_open() end)")
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), false)
+	expect.equality(#messages(), 1) -- ack only; no response sent
+	-- The state must not be poisoned: a follow-up request still opens.
+	child.lua(make_request("fast-2"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+end
+
+T["approval"]["on_remote_disconnect from a fast event closes the float"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	child.lua(make_request("dc-fast"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+	child.lua([[
+		_G._notified = {}
+		vim.notify = function(msg, level)
+			table.insert(_G._notified, { msg = msg, level = level })
+		end
+		local timer = vim.uv.new_timer()
+		timer:start(0, 0, function()
+			approval.on_remote_disconnect()
+		end)
+	]])
+	child.lua("vim.wait(2000, function() return not require('pi-bridge.fallback-select').is_open() end)")
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), false)
+	expect.equality(#messages(), 1) -- ack only; nothing sent on disconnect
+	child.lua("vim.wait(2000, function() return #_G._notified > 0 end)")
+	local notified = child.lua("return _G._notified")
+	expect.equality(#notified, 1)
+	expect.equality(notified[1].msg, "pi-bridge: pi disconnected")
+end
+
 T["approval"]["wrapper path: resolve(id) dismisses without sending a response"] = function()
 	-- Simulate a plugin picker: non-stock select that stores on_choice
 	-- (async — never calls it on its own).
