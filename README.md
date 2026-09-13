@@ -288,7 +288,11 @@ Health distinguishes between "is there a server" and "is Neovim connected to it"
 
 ## Edit Approval Prompt
 
-When pi is about to apply its `edit` or `write` tool, it sends an `approval_request` over the socket. pi-bridge.nvim renders the decision with `vim.ui.select` — the same picker the launch prompt uses, so it follows whatever picker plugin you have configured. The unified diff itself is shown in pi's TUI as a widget above the editor; Neovim is only the decision surface:
+When pi is about to apply its `edit` or `write` tool for a request that originated from Neovim, it sends an `approval_request` over the socket. Both surfaces then offer the same choice — Neovim's picker and a `y / a / n` prompt that replaces pi's input box — and **whichever answers first wins**. When pi answers (or the request settles for any reason), it broadcasts `approval_resolved` and the Neovim picker is dismissed automatically — no stale prompt waiting on an already-answered request. (Rationale: two answering surfaces with a lingering picker confused users; dismissal removes that.)
+
+Edits you type directly into pi never prompt — only Neovim-sent requests are gated.
+
+The picker follows your configured `vim.ui.select` (dressing, snacks, fzf-lua, ...). With the **stock** picker — which blocks in `inputlist()` and cannot be closed programmatically — pi-bridge shows its own minimal floating prompt (same choices, same keys) so dismissal still works.
 
 | Choice  | Decision | Effect                                              |
 |---------|----------|-----------------------------------------------------|
@@ -297,7 +301,9 @@ When pi is about to apply its `edit` or `write` tool, it sends an `approval_requ
 | `n`     | `no`     | Reject the tool call (pi narrates the rejection)    |
 | `<Esc>` | `no`     | Dismissed picker — same as `n`                      |
 
-An `approval_ack` is sent the moment the request arrives so pi knows Neovim took over (its own fallback overlay appears only if no ack arrives within 1s).
+An `approval_ack` is sent the moment the request arrives (kept for compatibility with older pi versions; current pi no longer requires it — there is no ack timeout).
+
+If pi disconnects while the picker is open, the picker is dismissed with a `pi disconnected` message and no response is sent.
 
 If the buffer for the target file is loaded and `&modified`, the prompt notes it — the diff is always computed from disk, so what you see is what pi will apply.
 
@@ -307,7 +313,7 @@ If the buffer for the target file is loaded and `&modified`, the prompt notes it
 require("pi-bridge").setup({ edit_approval_prompt = false })
 ```
 
-With this set, nvim never opens the picker or acks; pi sees no ack within 1s and falls back to its own in-TUI overlay. The protocol stays wired (you can flip it back on per-session) but nvim will not surface the prompt.
+With this set, nvim never opens the picker or acks; pi's own prompt becomes the sole decision surface for Neovim-sent edits.
 
 ### Protocol pairing
 
