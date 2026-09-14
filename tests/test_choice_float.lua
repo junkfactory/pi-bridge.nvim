@@ -59,13 +59,21 @@ T["choice_float"]["open opens an entered float and tracks the id"] = function()
 	)
 end
 
-T["choice_float"]["renders the caller's lines"] = function()
+T["choice_float"]["renders the caller's lines with padding"] = function()
 	child.lua(OPEN)
 	local lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(0), 0, -1, false)")
-	expect.equality(#lines, 6)
-	expect.equality(lines[1], "pick:")
-	expect.equality(lines[3], "1 - alpha")
-	expect.equality(lines[4], "2 - beta")
+	-- One blank padding line top and bottom, one leading space per line.
+	expect.equality(#lines, 8)
+	expect.equality(lines[1], "")
+	expect.equality(lines[2], "  pick:")
+	expect.equality(lines[4], "  1 - alpha")
+	expect.equality(lines[5], "  2 - beta")
+	expect.equality(lines[8], "")
+	-- Window is 2 wider and 2 taller than the caller's text area (unpinned
+	-- width = longest line + 4, clamped to a 20 minimum → 20 here).
+	local cfg = child.lua("return vim.api.nvim_win_get_config(0)")
+	expect.equality(cfg.width, 20)
+	expect.equality(cfg.height, 8)
 end
 
 T["choice_float"]["keypress sends the value then closes"] = function()

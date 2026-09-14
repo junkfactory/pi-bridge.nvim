@@ -38,9 +38,12 @@
 --                                on_choice fn(value)  called AFTER
 --                                          close; caller owns guards
 --                                          and message construction
---                                width?    number  default: fit the
---                                          longest line
---                                height?   number  default: #lines
+--                                width?    number  text-area width;
+--                                          default: fit the longest
+--                                          line (window grows by the
+--                                          padding on every axis)
+--                                height?   number  text-area line count;
+--                                          default: #lines
 --                              }
 --   M.close(owner)             dismiss silently (no echo, no response)
 --   M.close_silent(owner, msg) dismiss and echo `pi-bridge: <msg>`
@@ -62,6 +65,76 @@ local states = {}
 
 local function get_state(owner)
 	return states[owner]
+end
+
+-- Shared modal-box drawing: pad, size, center, open a focused float
+-- with a thin border and dimmed body. Both choice floats (approval,
+-- stock picker) and prompt_mirror's Esc-only notice render through
+-- this so the boxes stay visually identical in one place.
+--
+-- opts = {
+--   lines     string[]  content (unpadded)
+--   title     string    border title
+--   width?    number    TEXT-area width; default: fit longest line
+--   height?   number    TEXT-area line count; default: #lines
+-- }
+-- Returns win, buf (the float is entered/current on return).
+function M.draw_box(opts)
+	local lines = opts.lines
+	-- Visual padding: a blank line above and below the content, and two
+	-- leading spaces per line, so text sits well clear of the border on
+	-- all sides. Callers pass the TEXT-area width/height; the window
+	-- grows by the padding (2 vertical, 4 horizontal).
+	local padded = { "" }
+	for _, l in ipairs(lines) do
+		padded[#padded + 1] = "  " .. l
+	end
+	padded[#padded + 1] = ""
+
+	-- Width sized for the longest line unless the caller pins it (caller
+	-- width is the text area; +4 accounts for the horizontal padding).
+	local width
+	if type(opts.width) == "number" then
+		width = opts.width + 4
+	else
+		local max_len = 1
+		for _, l in ipairs(lines) do
+			if #l > max_len then max_len = #l end
+		end
+		width = math.max(20, math.min(max_len + 6, vim.o.columns - 4))
+	end
+	local height = type(opts.height) == "number" and (opts.height + 2) or #padded
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	-- scratch + listed=false so :ls doesn't show it; buftype=nofile.
+	vim.bo[buf].bufhidden = "wipe"
+	vim.bo[buf].swapfile = false
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, padded)
+
+	-- Center the float on the editor screen.
+	local total_lines = vim.o.lines
+	local total_cols = vim.o.columns
+	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
+	local col = math.max(0, math.floor((total_cols - width) / 2))
+
+	-- Dimmed body: map the float's text to PiBridgeFloatBody (linked to
+	-- Comment by default; themes can override). The border/title use
+	-- FloatBorder/FloatTitle and are unaffected by this mapping.
+	vim.api.nvim_set_hl(0, "PiBridgeFloatBody", { default = true, link = "Comment" })
+	local win = vim.api.nvim_open_win(buf, true, {
+		relative = "editor",
+		width = width,
+		height = height,
+		row = row,
+		col = col,
+		style = "minimal",
+		border = "single",
+		title = opts.title or "",
+		title_pos = "center",
+	})
+	-- winhighlight is a window option, not an nvim_open_win config key.
+	vim.wo[win].winhl = "Normal:PiBridgeFloatBody,NormalFloat:PiBridgeFloatBody"
+	return win, buf
 end
 
 -- Drop the state handle if the float's window was closed behind our
@@ -170,41 +243,12 @@ function M.open(spec)
 		return false
 	end
 
-	local lines = spec.lines
-	-- Width sized for the longest line unless the caller pins it.
-	local width = spec.width
-	if type(width) ~= "number" then
-		local max_len = 1
-		for _, l in ipairs(lines) do
-			if #l > max_len then max_len = #l end
-		end
-		width = math.max(20, math.min(max_len + 2, vim.o.columns - 4))
-	end
-	local height = type(spec.height) == "number" and spec.height or #lines
-
-	local buf = vim.api.nvim_create_buf(false, true)
-	-- scratch + listed=false so :ls doesn't show it; buftype=nofile.
-	vim.bo[buf].bufhidden = "wipe"
-	vim.bo[buf].swapfile = false
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-	-- Center the float on the editor screen.
-	local total_lines = vim.o.lines
-	local total_cols = vim.o.columns
-	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
-	local col = math.max(0, math.floor((total_cols - width) / 2))
-
 	local prev_win = vim.api.nvim_get_current_win()
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = "editor",
-		width = width,
-		height = height,
-		row = row,
-		col = col,
-		style = "minimal",
-		border = "rounded",
-		title = spec.title or "",
-		title_pos = "center",
+	local win, buf = M.draw_box({
+		lines = spec.lines,
+		title = spec.title,
+		width = spec.width,
+		height = spec.height,
 	})
 
 	states[owner] = {

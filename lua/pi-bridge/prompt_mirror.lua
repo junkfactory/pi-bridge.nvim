@@ -483,32 +483,20 @@ local function show_custom(req)
 	for _, l in ipairs(lines) do
 		if #l > max_len then max_len = #l end
 	end
+	-- Text-area values; draw_box applies padding and grows the window.
 	local width = math.max(20, math.min(max_len + 2, vim.o.columns - 4))
 	local height = #lines
-
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.bo[buf].bufhidden = "wipe"
-	vim.bo[buf].swapfile = false
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-	local total_lines = vim.o.lines
-	local total_cols = vim.o.columns
-	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
-	local col = math.max(0, math.floor((total_cols - width) / 2))
 
 	local prev_win = vim.api.nvim_get_current_win()
 	-- Focused float: nvim's input belongs to the notice while it's up.
 	-- The message text sets that expectation ("other keys do nothing").
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = "editor",
+	-- Same shared box drawing as the choice floats (padding, thin
+	-- border, dimmed body; title keeps FloatTitle styling).
+	local win, buf = choice_float.draw_box({
+		lines = lines,
+		title = NOTICE_TITLE,
 		width = width,
 		height = height,
-		row = row,
-		col = col,
-		style = "minimal",
-		border = "rounded",
-		title = NOTICE_TITLE,
-		title_pos = "center",
 	})
 
 	-- nvim defers screen redraw while Lua is executing, so a float

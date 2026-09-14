@@ -43,11 +43,15 @@ T["fallback-select"]["show renders the prompt and three choices"] = function()
 	local lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(vim.fn.bufwinid('^/tmp/example.lua$') ~= -1 and vim.api.nvim_win_get_buf(0) or 0), 0, -1, false)")
 	-- Simpler: read the current window's buffer directly.
 	lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(0), 0, -1, false)")
-	expect.equality(#lines, 5)
-	expect.equality(lines[1], "approve edit: /tmp/example.lua")
-	expect.equality(lines[3], "y — yes to this edit")
-	expect.equality(lines[4], "a — approve all edits to this file (this session)")
-	expect.equality(lines[5], "n — reject this edit")
+	-- choice_float adds a blank padding line top/bottom and one leading
+	-- space per content line.
+	expect.equality(#lines, 7)
+	expect.equality(lines[1], "")
+	expect.equality(lines[2], "  approve edit: /tmp/example.lua")
+	expect.equality(lines[4], "  y — yes to this edit")
+	expect.equality(lines[5], "  a — approve all edits to this file (this session)")
+	expect.equality(lines[6], "  n — reject this edit")
+	expect.equality(lines[7], "")
 end
 
 T["fallback-select"]["prompt notes buffer-modified warning"] = function()
@@ -62,7 +66,7 @@ T["fallback-select"]["prompt notes buffer-modified warning"] = function()
 		fsel.show({ type='approval_request', id='fs-warn', tool='edit', path=_G._fsel_target, diff='x' }, fake_send)
 	]])
 	local lines = child.lua("return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(0), 0, -1, false)")
-	expect.equality(lines[1]:find("buffer has unsaved changes", 1, true) ~= nil, true)
+	expect.equality(lines[2]:find("buffer has unsaved changes", 1, true) ~= nil, true)
 end
 
 T["fallback-select"]["'y' sends yes and closes"] = function()

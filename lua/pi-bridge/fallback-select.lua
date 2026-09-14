@@ -33,10 +33,11 @@ local M = {}
 -- an approval float and a mirror float can coexist.
 local OWNER = "approval"
 
--- Visual styling: modest width, centered-ish, single border. Width
--- sized for the longest label (~50 chars) plus padding.
-local WIN_WIDTH = 52
-local WIN_HEIGHT = 6 -- prompt + blank + 3 choices
+-- Visual styling: modest width, centered-ish, thin border. Width is
+-- the TEXT area (choice_float adds its padding on top); sized for the
+-- longest label (~50 chars) plus breathing room.
+local WIN_WIDTH = 54
+local WIN_HEIGHT = 6 -- prompt + blank + 3 choices (padding added by choice_float)
 
 -- Labels mirror approval.lua's CHOICES. The y item avoids the letters
 -- 'a'/'n' (and n avoids 'a'/'y') so fuzzy pickers that filter as you

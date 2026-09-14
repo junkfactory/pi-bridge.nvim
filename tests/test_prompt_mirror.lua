@@ -319,15 +319,17 @@ T["mirror"]["stock picker renders trimmed labels and numbered choices"] = functi
 	]])
 	expect.equality(child.lua(IS_FLOAT_OPEN), true)
 	local lines = child.lua(FLOAT_LINES)
-	expect.equality(lines[1], "pick one")
-	expect.equality(lines[2], "")
-	expect.equality(lines[3]:sub(1, 3), "1 -")
-	expect.equality(lines[3]:sub(5), "alpha")
-	expect.equality(lines[4]:sub(1, 3), "2 -")
-	expect.equality(lines[4]:sub(-3), "...")
-	expect.equality(lines[5]:sub(1, 3), "3 -")
-	expect.equality(lines[5]:sub(5), "gamma")
-	expect.equality(lines[#lines]:sub(1, 5), "<Esc>")
+	-- choice_float pads: blank first line, one leading space per line.
+	expect.equality(lines[1], "")
+	expect.equality(lines[2], "  pick one")
+	expect.equality(lines[3], "  ") -- blank separator from build_stock_lines
+	expect.equality(lines[4]:sub(3, 5), "1 -")
+	expect.equality(lines[4]:sub(7), "alpha")
+	expect.equality(lines[5]:sub(3, 5), "2 -")
+	expect.equality(lines[5]:sub(-3), "...")
+	expect.equality(lines[6]:sub(3, 5), "3 -")
+	expect.equality(lines[6]:sub(7), "gamma")
+	expect.equality(lines[#lines - 1]:sub(3, 7), "<Esc>") -- last line is padding blank
 end
 
 T["mirror"]["stock picker sends full label on numbered key"] = function()
@@ -536,8 +538,8 @@ T["mirror"]["custom notice shows message only"] = function()
 	expect.equality(child.lua(IS_FLOAT_OPEN), true)
 	local lines = child.lua(FLOAT_LINES)
 	-- Message-only: the pi dialog's rendered lines are NOT mirrored.
-	expect.equality(lines[1], "Answer in the pi window.")
-	expect.equality(lines[3], "Esc: abort pi's input ask · other keys do nothing here")
+	expect.equality(lines[2], "  Answer in the pi window.")
+	expect.equality(lines[4], "  Esc: abort pi's input ask · other keys do nothing here")
 	for _, l in ipairs(lines) do
 		expect.equality(l:find("Permission Required", 1, true) ~= nil, false)
 	end
@@ -585,7 +587,7 @@ T["mirror"]["custom notice ignores re-render broadcasts"] = function()
 		}, fake_send)
 	]])
 	expect.equality(child.lua(IS_FLOAT_OPEN), true)
-	expect.equality(child.lua(FLOAT_LINES)[1], "Answer in the pi window.")
+	expect.equality(child.lua(FLOAT_LINES)[2], "  Answer in the pi window.")
 	-- Re-render: same id, changed lines — the notice must not change.
 	child.lua([[
 
@@ -597,7 +599,7 @@ T["mirror"]["custom notice ignores re-render broadcasts"] = function()
 		}, fake_send)
 	]])
 	local lines = child.lua(FLOAT_LINES)
-	expect.equality(lines[1], "Answer in the pi window.")
+	expect.equality(lines[2], "  Answer in the pi window.")
 	-- Still exactly one surface — no duplicate float spawned.
 	expect.equality(child.lua(IS_FLOAT_OPEN), true)
 	child.lua("vim.fn.getcharstr = function() return '' end")
