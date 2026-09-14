@@ -68,9 +68,11 @@ local function get_state(owner)
 end
 
 -- Shared modal-box drawing: pad, size, center, open a focused float
--- with a thin border and dimmed body. Both choice floats (approval,
--- stock picker) and prompt_mirror's Esc-only notice render through
--- this so the boxes stay visually identical in one place.
+-- with a thin, dimmed border. Both choice floats (approval, stock
+-- picker) and prompt_mirror's Esc-only notice render through this so
+-- the boxes stay visually identical in one place. Body text keeps the
+-- normal NormalFloat color; the border is dimmed (FloatBorder ->
+-- PiBridgeFloatBorder) while FloatTitle is left as-is.
 --
 -- opts = {
 --   lines     string[]  content (unpadded)
@@ -117,10 +119,10 @@ function M.draw_box(opts)
 	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
 	local col = math.max(0, math.floor((total_cols - width) / 2))
 
-	-- Dimmed body: map the float's text to PiBridgeFloatBody (linked to
-	-- Comment by default; themes can override). The border/title use
-	-- FloatBorder/FloatTitle and are unaffected by this mapping.
-	vim.api.nvim_set_hl(0, "PiBridgeFloatBody", { default = true, link = "Comment" })
+	-- Body text keeps the normal NormalFloat color; dim only the border
+	-- (FloatBorder -> PiBridgeFloatBorder, default-linked to Comment).
+	-- FloatTitle (the border title) is left as-is.
+	vim.api.nvim_set_hl(0, "PiBridgeFloatBorder", { default = true, link = "Comment" })
 	local win = vim.api.nvim_open_win(buf, true, {
 		relative = "editor",
 		width = width,
@@ -133,7 +135,9 @@ function M.draw_box(opts)
 		title_pos = "center",
 	})
 	-- winhighlight is a window option, not an nvim_open_win config key.
-	vim.wo[win].winhl = "Normal:PiBridgeFloatBody,NormalFloat:PiBridgeFloatBody"
+	-- Map only FloatBorder so the frame is dimmed while body/title stay
+	-- their normal colors.
+	vim.wo[win].winhl = "FloatBorder:PiBridgeFloatBorder"
 	return win, buf
 end
 

@@ -490,8 +490,8 @@ local function show_custom(req)
 	local prev_win = vim.api.nvim_get_current_win()
 	-- Focused float: nvim's input belongs to the notice while it's up.
 	-- The message text sets that expectation ("other keys do nothing").
-	-- Same shared box drawing as the choice floats (padding, thin
-	-- border, dimmed body; title keeps FloatTitle styling).
+	-- Same shared box drawing as the choice floats (padding, thin border;
+	-- title keeps FloatTitle styling).
 	local win, buf = choice_float.draw_box({
 		lines = lines,
 		title = NOTICE_TITLE,
