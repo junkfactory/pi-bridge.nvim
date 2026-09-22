@@ -151,11 +151,11 @@ Include context directly in your message using placeholders:
 
 | Placeholder    | Replaces with                                            | Example                         |
 |----------------|----------------------------------------------------------|---------------------------------|
-| `@this`        | Current line with line number                            | `line 25: local x = 1`          |
-| `@selection`   | Visual selection (empty in normal mode)                  | Selected text                   |
+| `@this`        | Current line as a fenced code block (filetype language)  | ` ```lua local x = 1 ``` `      |
+| `@selection`   | Visual selection as a fenced code block (empty in normal mode) | Fenced selection text     |
 | `@buffer`      | Absolute path to current buffer                          | `/path/to/file.lua`             |
 | `@buffers`     | Newline-separated list of open buffer paths              | `/path/a.lua\n/path/b.lua`      |
-| `@content`     | Content of current buffer (truncated at ~900KB if large) | Full buffer contents            |
+| `@content`     | Buffer content as a fenced code block (truncated at ~900KB if large) | Full buffer contents |
 | `@diagnostics` | LSP diagnostics for current buffer                       | `L1:C1 [ERROR] unused variable` |
 
 Examples:
@@ -171,6 +171,8 @@ Examples:
 ```
 
 Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocomplete suggestions.
+
+`@this` and `@selection` also report their line range to pi, which appears on the `File:` header link as `File: [main.lua:12-200](/path/to/main.lua)`. `@content` is not ranged.
 
 ## Setup
 

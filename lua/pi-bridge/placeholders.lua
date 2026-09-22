@@ -11,10 +11,37 @@ local SEVERITY_NAMES = {
 	[4] = "HINT",
 }
 
+local function buf_filetype()
+	local ft = vim.bo.filetype
+	return ft ~= "" and ft or "text"
+end
+
+-- Opening fence long enough to survive backtick runs in the content
+-- (CommonMark: a closing fence is a line-start run >= opening length,
+-- so opening with longest-run+1 can never be closed early).
+local function fence_marker(value)
+	local longest = 0
+	for _, line in ipairs(vim.split(value, "\n")) do
+		local run = line:match("^`+")
+		if run and #run > longest then longest = #run end
+	end
+	return string.rep("`", math.max(3, longest + 1))
+end
+
+-- Format a substitution as a markdown fenced code block. No space between
+-- the marker and the language (canonical info-string form). Blank lines
+-- pad both sides so surrounding text ("in @this replace foo") forms its
+-- own paragraphs — a fence must start at line start, and padding prevents
+-- lazy continuation.
+local function format_fence(value, filetype)
+	local marker = fence_marker(value)
+	return "\n\n" .. marker .. filetype .. "\n" .. value .. "\n" .. marker .. "\n\n"
+end
+
 local function resolve_this()
 	local row = vim.api.nvim_win_get_cursor(0)[1]
 	local line = vim.api.nvim_get_current_line()
-	return string.format("line %d: %s", row, line)
+	return format_fence(line, buf_filetype()), row, row
 end
 
 -- getpos returns BYTE columns. For charwise selections we want CHAR columns
@@ -94,7 +121,7 @@ local function extract_selection(start_pos, end_pos, linewise)
 	end
 
 	if linewise then
-		return table.concat(lines, "\n")
+		return table.concat(lines, "\n"), start_line, end_line
 	end
 
 	-- trim first line from start_col to end-of-line, last line from 1 to end_col
@@ -105,7 +132,7 @@ local function extract_selection(start_pos, end_pos, linewise)
 		lines[#lines] = sub_chars(lines[#lines], 1, end_col)
 	end
 
-	return table.concat(lines, "\n")
+	return table.concat(lines, "\n"), start_line, end_line
 end
 
 -- Blockwise (Ctrl-V): apply the block's screen-column range to every line
@@ -150,11 +177,12 @@ local function extract_block_selection(pos_a, pos_b)
 			table.insert(out, table.concat(pieces, ""))
 		end
 	end
-	return table.concat(out, "\n")
+	return table.concat(out, "\n"), start_line, end_line
 end
 
 local function resolve_selection()
 	local mode = vim.fn.mode()
+	local text, start_line, end_line
 	if VISUAL_MODES[mode] then
 		-- Active visual mode: the '< and '> marks are NOT set yet — they are
 		-- only written when visual mode exits. A visual keymap that opens a
@@ -162,26 +190,32 @@ local function resolve_selection()
 		-- visual mode afterwards) reaches resolve() while visual is still
 		-- active. Read the 'v and '.' marks, which are valid then.
 		if mode == "\22" then
-			return extract_block_selection(vim.fn.getpos("v"), vim.fn.getpos("."))
+			text, start_line, end_line = extract_block_selection(vim.fn.getpos("v"), vim.fn.getpos("."))
+		else
+			text, start_line, end_line = extract_selection(vim.fn.getpos("v"), vim.fn.getpos("."), mode == "V")
 		end
-		return extract_selection(vim.fn.getpos("v"), vim.fn.getpos("."), mode == "V")
+	else
+		-- Exited visual mode: the input widget the keymap opened has taken
+		-- focus. Which one decides the state we see here — a floating input
+		-- (e.g. snacks.nvim overriding vim.ui.input under LazyVim) exits
+		-- visual mode, so '< and '> are set; the nvim 0.12 builtin cmdline
+		-- input restores visual mode instead (handled above). Either way
+		-- vim.fn.visualmode() returns the last visual mode used ('v', 'V',
+		-- or '\22') and persists after exiting, unlike vim.fn.mode().
+		local last_visual = vim.fn.visualmode()
+		if not VISUAL_MODES[last_visual] then
+			return ""
+		end
+		if last_visual == "\22" then
+			text, start_line, end_line = extract_block_selection(vim.fn.getpos("'<"), vim.fn.getpos("'>"))
+		else
+			text, start_line, end_line = extract_selection(vim.fn.getpos("'<"), vim.fn.getpos("'>"), last_visual == "V")
+		end
 	end
-
-	-- Exited visual mode: the input widget the keymap opened has taken
-	-- focus. Which one decides the state we see here — a floating input
-	-- (e.g. snacks.nvim overriding vim.ui.input under LazyVim) exits
-	-- visual mode, so '< and '> are set; the nvim 0.12 builtin cmdline
-	-- input restores visual mode instead (handled above). Either way
-	-- vim.fn.visualmode() returns the last visual mode used ('v', 'V',
-	-- or '\22') and persists after exiting, unlike vim.fn.mode().
-	local last_visual = vim.fn.visualmode()
-	if not VISUAL_MODES[last_visual] then
+	if not text or text == "" then
 		return ""
 	end
-	if last_visual == "\22" then
-		return extract_block_selection(vim.fn.getpos("'<"), vim.fn.getpos("'>"))
-	end
-	return extract_selection(vim.fn.getpos("'<"), vim.fn.getpos("'>"), last_visual == "V")
+	return format_fence(text, buf_filetype()), start_line, end_line
 end
 
 local function format_diagnostic(diag)
@@ -262,8 +296,14 @@ local function resolve_content()
 	local total = #lines
 	local content = table.concat(lines, "\n")
 
+	-- Empty buffer keeps the literal placeholder (pre-existing guard; the
+	-- outer `value == ""` check in resolve_with_range preserves it).
+	if content == "" then
+		return ""
+	end
+
 	if #content <= CONTENT_BYTE_LIMIT then
-		return content
+		return format_fence(content, buf_filetype())
 	end
 
 	-- Take lines from the top until we'd exceed the byte budget, leaving
@@ -281,7 +321,8 @@ local function resolve_content()
 	end
 
 	local shown = #kept
-	return table.concat(kept, "\n") .. "\n" .. format_truncation_notice(shown, total, #content)
+	local truncated = table.concat(kept, "\n") .. "\n" .. format_truncation_notice(shown, total, #content)
+	return format_fence(truncated, buf_filetype())
 end
 
 local RESOLVERS = {
@@ -296,19 +337,18 @@ local RESOLVERS = {
 M.PLACEHOLDERS = vim.tbl_keys(RESOLVERS)
 table.sort(M.PLACEHOLDERS)
 
-function M.resolve(text)
-	if type(text) ~= "string" or text == "" then
-		return text or ""
-	end
-
-	return (string.gsub(text, "@(%w+)", function(key)
+-- Like resolve(), but also returns a compact range string for the ranged
+-- placeholders that fired ("25", "12-200", "25,40-45"), or nil.
+function M.resolve_with_range(text)
+	local spans = {}
+	local out = (string.gsub(text or "", "@(%w+)", function(key)
 		local resolver = RESOLVERS[key]
 		if not resolver then
 			return nil -- unknown placeholder: keep literal
 		end
 		-- A resolver that errors must not break the whole send: fall
 		-- back to the literal placeholder like the empty case below.
-		local ok, value = pcall(resolver)
+		local ok, value, start_line, end_line = pcall(resolver)
 		if not ok then
 			log.warn("placeholder @" .. key .. " failed to resolve: " .. tostring(value))
 			return nil
@@ -319,8 +359,29 @@ function M.resolve(text)
 			-- fire instead of silently losing it.
 			return nil
 		end
+		if start_line then
+			table.insert(spans, { start = start_line, ["end"] = end_line })
+		end
 		return value
 	end))
+	table.sort(spans, function(a, b)
+		return a.start < b.start or (a.start == b.start and a["end"] < b["end"])
+	end)
+	local parts, seen = {}, {}
+	for _, r in ipairs(spans) do
+		local s = r.start == r["end"] and tostring(r.start)
+			or string.format("%d-%d", r.start, r["end"])
+		if not seen[s] then
+			seen[s] = true
+			table.insert(parts, s)
+		end
+	end
+	if #parts == 0 then return out, nil end
+	return out, table.concat(parts, ",")
+end
+
+function M.resolve(text)
+	return (M.resolve_with_range(text))
 end
 
 return M

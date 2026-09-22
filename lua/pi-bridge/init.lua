@@ -303,13 +303,17 @@ function M.prompt(opts)
 		if not text or text == "" then return end
 
 		-- Resolve @this, @selection, @diagnostics placeholders
-		local resolved = placeholders.resolve(text)
+		local resolved, range = placeholders.resolve_with_range(text)
 
 		local ok_ctx, ctx = pcall(context.get, mode)
 		if not ok_ctx then
 			log.error("failed to gather context: " .. tostring(ctx))
 			vim.notify("𝜋 failed to gather context", vim.log.levels.ERROR)
 			return
+		end
+
+		if range then
+			ctx.range = range
 		end
 
 		log.info("prompt: " .. resolved .. " (" .. ctx.mode .. ", " .. ctx.file .. ")")

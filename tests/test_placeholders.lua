@@ -21,11 +21,36 @@ T["placeholders"]["resolve replaces @this with current line"] = function()
 	child.lua([[
 		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
 		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.bo.filetype = 'lua'
 	]])
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("look at @this")
 	]])
-	expect.equality(result:find("line 2: bbb") ~= nil, true)
+	expect.equality(result, "look at \n\n```lua\nbbb\n```\n\n")
+end
+
+T["placeholders"]["resolve_with_range reports @this row number"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@this"))
+	]])
+	expect.equality(range, "2")
+end
+
+T["placeholders"]["resolve keeps surrounding text outside the fence"] = function()
+	-- User's edge case: text before AND after @this must remain outside
+	-- the fence (separate paragraphs in markdown).
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("in @this replace foo with boo")
+	]])
+	expect.equality(result, "in \n\n```text\nbbb\n```\n\n replace foo with boo")
 end
 
 T["placeholders"]["resolve replaces @selection with selected text"] = function()
@@ -40,7 +65,7 @@ T["placeholders"]["resolve replaces @selection with selected text"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("explain @selection")
 	]])
-	expect.equality(result:find("bbb") ~= nil, true)
+	expect.equality(result, "explain \n\n```text\nbbb\nccc\n```\n\n")
 end
 
 T["placeholders"]["resolve keeps literal @selection when nothing is selected"] = function()
@@ -68,7 +93,7 @@ T["placeholders"]["resolve replaces @selection while visual mode is still active
 	child.lua([[vim.api.nvim_win_set_cursor(0, { 3, 2 })]])
 	expect.equality(child.fn.mode(), "v")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("x @selection y")]])
-	expect.equality(result, "x bbb\nccc y")
+	expect.equality(result, "x \n\n```text\nbbb\nccc\n```\n\n y")
 end
 
 T["placeholders"]["resolve replaces @selection with full lines while linewise visual is active"] = function()
@@ -82,7 +107,7 @@ T["placeholders"]["resolve replaces @selection with full lines while linewise vi
 	child.lua([[vim.api.nvim_win_set_cursor(0, { 3, 1 })]])
 	expect.equality(child.fn.mode(), "V")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "bbb\nccc")
+	expect.equality(result, "\n\n```text\nbbb\nccc\n```\n\n")
 end
 
 T["placeholders"]["resolve replaces @selection with block columns while blockwise visual is active"] = function()
@@ -95,7 +120,7 @@ T["placeholders"]["resolve replaces @selection with block columns while blockwis
 	expect.equality(child.fn.mode(), "\22")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
 	-- Lines 2-3, columns 1-3: "fun" (from "funky") and "zzz" (from "zzzz").
-	expect.equality(result, "fun\nzzz")
+	expect.equality(result, "\n\n```text\nfun\nzzz\n```\n\n")
 end
 
 T["placeholders"]["resolve replaces @selection with block columns after blockwise visual"] = function()
@@ -107,7 +132,7 @@ T["placeholders"]["resolve replaces @selection with block columns after blockwis
 		vim.cmd('normal! \27')
 	]])
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "fun\nzzz")
+	expect.equality(result, "\n\n```text\nfun\nzzz\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection skips lines shorter than the block"] = function()
@@ -120,7 +145,7 @@ T["placeholders"]["resolve block selection skips lines shorter than the block"] 
 	]])
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
 	-- Columns 3-5 on lines 1 and 3; "x" is too short and is dropped.
-	expect.equality(result, "cde\ncde")
+	expect.equality(result, "\n\n```text\ncde\ncde\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection normalizes right-to-left drag"] = function()
@@ -134,7 +159,7 @@ T["placeholders"]["resolve block selection normalizes right-to-left drag"] = fun
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
 	-- Corners (3,4) and (2,1): lines 2-3, columns 1-4 -> "funk" (from
 	-- "funky") and "zzzz"; line 1 "world" is outside the block.
-	expect.equality(result, "funk\nzzzz")
+	expect.equality(result, "\n\n```text\nfunk\nzzzz\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection over box-drawing chars keeps whole chars"] = function()
@@ -154,7 +179,7 @@ T["placeholders"]["resolve block selection over box-drawing chars keeps whole ch
 	]])
 	expect.equality(child.fn.mode(), "\22")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "┌───\n│ pi")
+	expect.equality(result, "\n\n```text\n┌───\n│ pi\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection after exit covers box-drawing chars"] = function()
@@ -169,7 +194,7 @@ T["placeholders"]["resolve block selection after exit covers box-drawing chars"]
 		vim.cmd('normal! \27')
 	]])
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "┌───\n│ pi")
+	expect.equality(result, "\n\n```text\n┌───\n│ pi\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection includes whole multibyte char at right edge"] = function()
@@ -189,7 +214,7 @@ T["placeholders"]["resolve block selection includes whole multibyte char at righ
 	expect.equality(child.fn.mode(), "\22")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
 	-- Whole line, closing │ included (no mid-char truncation).
-	expect.equality(result, "│ pi (TUI)     │")
+	expect.equality(result, "\n\n```text\n│ pi (TUI)     │\n```\n\n")
 end
 
 T["placeholders"]["resolve block selection handles wide CJK chars at edge"] = function()
@@ -205,7 +230,7 @@ T["placeholders"]["resolve block selection handles wide CJK chars at edge"] = fu
 	]])
 	expect.equality(child.fn.mode(), "\22")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "日本")
+	expect.equality(result, "\n\n```text\n日本\n```\n\n")
 end
 
 T["placeholders"]["resolve charwise selection over multibyte keeps whole chars"] = function()
@@ -223,7 +248,7 @@ T["placeholders"]["resolve charwise selection over multibyte keeps whole chars"]
 	]])
 	expect.equality(child.fn.mode(), "v")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "日本語")
+	expect.equality(result, "\n\n```text\n日本語\n```\n\n")
 end
 
 T["placeholders"]["resolve replaces @selection with full lines after linewise visual"] = function()
@@ -236,7 +261,83 @@ T["placeholders"]["resolve replaces @selection with full lines after linewise vi
 		vim.cmd('normal! \27')
 	]])
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
-	expect.equality(result, "bbb\nccc")
+	expect.equality(result, "\n\n```text\nbbb\nccc\n```\n\n")
+end
+
+T["placeholders"]["resolve_with_range reports multi-line selection range"] = function()
+	-- Charwise v from row 2 over rows 2-4 (cursor col 0 on row 4 includes
+	-- one char of it) -> range "2-4".
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc', 'ddd' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! v')
+		vim.api.nvim_win_set_cursor(0, { 4, 0 })
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@selection"))
+	]])
+	expect.equality(range, "2-4")
+end
+
+T["placeholders"]["resolve_with_range reports linewise selection range from '<' to '>'"] = function()
+	-- Linewise V from row 1 to row 3 -> '< and '> mark rows normalize.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! V')
+		vim.api.nvim_win_set_cursor(0, { 3, 0 })
+		vim.cmd('normal! \27')
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@selection"))
+	]])
+	expect.equality(range, "1-3")
+end
+
+T["placeholders"]["resolve_with_range reports block selection range"] = function()
+	-- Block (\22) from row 2 col 1 to row 3 col 4.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'world', 'funky', 'zzzz' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+		vim.cmd('normal! \22')
+		vim.api.nvim_win_set_cursor(0, { 3, 3 })
+		vim.cmd('normal! \27')
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@selection"))
+	]])
+	expect.equality(range, "2-3")
+end
+
+T["placeholders"]["resolve preserves empty line inside multi-line selection fence"] = function()
+	-- Empty lines inside @selection must be preserved verbatim inside the
+	-- fence (no special handling required — markdown fences pass empty
+	-- lines through).
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', '', 'ccc' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! v')
+		vim.api.nvim_win_set_cursor(0, { 3, 999 })
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	expect.equality(result, "\n\n```text\naaa\n\nccc\n```\n\n")
+end
+
+T["placeholders"]["resolve lengthens opening fence to survive backtick runs in content"] = function()
+	-- Content with a 4-backtick run would close a 3-backtick fence early.
+	-- fence_marker must open with run+1 (= 5 here). The closing fence can
+	-- stay the same length; CommonMark's "longer run ends" rule keeps it
+	-- from accidentally closing the longer opening.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'normal', '````hidden', 'also normal' })
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd('normal! V')
+		vim.api.nvim_win_set_cursor(0, { 3, 999 })
+		vim.cmd('normal! \27')
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@selection")]])
+	-- Opening is 5 backticks; closing is 5 backticks (longer run rule).
+	expect.equality(result, "\n\n`````text\nnormal\n````hidden\nalso normal\n`````\n\n")
 end
 
 T["placeholders"]["resolve replaces @buffer with current buffer absolute path"] = function()
@@ -291,7 +392,40 @@ T["placeholders"]["resolve replaces @content with buffer content"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("@content")
 	]])
-	expect.equality(result, "alpha\nbeta\ngamma")
+	expect.equality(result, "\n\n```text\nalpha\nbeta\ngamma\n```\n\n")
+end
+
+T["placeholders"]["resolve_with_range returns nil for @content-only prompts"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { "alpha", "beta", "gamma" })
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@content"))
+	]])
+	expect.equality(range, vim.NIL)
+end
+
+T["placeholders"]["resolve @content uses buffer filetype as fence language"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { "x = 1" })
+		vim.bo.filetype = 'python'
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("@content")
+	]])
+	expect.equality(result, "\n\n```python\nx = 1\n```\n\n")
+end
+
+T["placeholders"]["resolve @content falls back to 'text' when filetype is empty"] = function()
+	-- Default child nvim buffer has no filetype set; language must be "text".
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { "x = 1" })
+		vim.bo.filetype = ''
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve("@content")
+	]])
+	expect.equality(result, "\n\n```text\nx = 1\n```\n\n")
 end
 
 T["placeholders"]["resolve @content truncates large buffers with notice"] = function()
@@ -316,6 +450,35 @@ T["placeholders"]["resolve @content truncates large buffers with notice"] = func
 	-- Truncated payload must be smaller than the original by a wide margin.
 	-- Original payload ~ 1,101,100 bytes; truncated well under that.
 	expect.equality(#result < 1100000, true)
+	-- The notice must remain inside the fence — look for the closing fence
+	-- AFTER the notice line.
+	local notice_pos = result:find("[truncated:", 1, true)
+	local fence_close = result:find("```\n\n", notice_pos, true)
+	expect.equality(fence_close ~= nil, true)
+end
+
+T["placeholders"]["resolve_with_range returns nil range for truncated @content"] = function()
+	child.lua([[
+		local chunk = string.rep("x", 1000)
+		local lines = {}
+		for i = 1, 1100 do
+			lines[i] = chunk
+		end
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+	]])
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@content"))
+	]])
+	expect.equality(range, vim.NIL)
+end
+
+T["placeholders"]["resolve lengthens opening fence to survive backtick runs in @content"] = function()
+	-- @content with a 4-backtick line forces the opening fence to 5 backticks.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'normal', '````hidden', 'also normal' })
+	]])
+	local result = child.lua([[return require('pi-bridge.placeholders').resolve("@content")]])
+	expect.equality(result, "\n\n`````text\nnormal\n````hidden\nalso normal\n`````\n\n")
 end
 
 T["placeholders"]["resolve replaces @diagnostics with formatted output"] = function()
@@ -340,6 +503,8 @@ T["placeholders"]["resolve leaves unknown @tokens unchanged"] = function()
 end
 
 T["placeholders"]["resolve handles multiple placeholders"] = function()
+	-- @this fires and gets fenced; @selection in normal mode has no marks
+	-- to read so it keeps the literal (pre-existing guard).
 	child.lua([[
 		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb' })
 		vim.api.nvim_win_set_cursor(0, { 2, 0 })
@@ -348,8 +513,23 @@ T["placeholders"]["resolve handles multiple placeholders"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("@this and @selection")
 	]])
-	expect.equality(result:find("line 2: bbb") ~= nil, true)
-	expect.equality(result, "line 2: bbb and @selection")
+	expect.equality(result:find("\n\n```text\nbbb\n```\n\n") ~= nil, true)
+	expect.equality(result, "\n\n```text\nbbb\n```\n\n and @selection")
+end
+
+T["placeholders"]["resolve_with_range joins multiple ranged placeholders sorted"] = function()
+	-- Two @this placeholders in one prompt must produce a sorted,
+	-- comma-joined range string.
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'aaa', 'bbb' })
+		vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	]])
+	-- First @this fires (row 2); second @this also fires (cursor parked
+	-- on row 2) — duplicate row must dedupe.
+	local range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range("@this and @this"))
+	]])
+	expect.equality(range, "2")
 end
 
 T["placeholders"]["resolve handles no diagnostics gracefully"] = function()
