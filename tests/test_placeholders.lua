@@ -586,12 +586,12 @@ T["placeholders"]["resolve handles nil input"] = function()
 	expect.equality(result, "")
 end
 
-T["placeholders"]["PLACEHOLDERS is a table with 6 entries"] = function()
+T["placeholders"]["PLACEHOLDERS is a table with 7 entries"] = function()
 	local result = child.lua([[
 		local p = require('pi-bridge.placeholders')
 		return #p.PLACEHOLDERS
 	]])
-	expect.equality(result, 6)
+	expect.equality(result, 7)
 end
 
 T["placeholders"]["PLACEHOLDERS contains expected names"] = function()
@@ -609,6 +609,7 @@ T["placeholders"]["PLACEHOLDERS contains expected names"] = function()
 	expect.equality(result["buffer"], true)
 	expect.equality(result["buffers"], true)
 	expect.equality(result["content"], true)
+	expect.equality(result["marks"], true)
 end
 
 T["placeholders"]["PLACEHOLDERS is sorted alphabetically"] = function()
@@ -620,8 +621,9 @@ T["placeholders"]["PLACEHOLDERS is sorted alphabetically"] = function()
 	expect.equality(result[2], "buffers")
 	expect.equality(result[3], "content")
 	expect.equality(result[4], "diagnostics")
-	expect.equality(result[5], "selection")
-	expect.equality(result[6], "this")
+	expect.equality(result[5], "marks")
+	expect.equality(result[6], "selection")
+	expect.equality(result[7], "this")
 end
 
 T["placeholders"]["complete returns all placeholders for bare @"] = function()
@@ -629,8 +631,8 @@ T["placeholders"]["complete returns all placeholders for bare @"] = function()
 	local result = child.lua([[
 		return _G._pi_bridge_complete("@", "", 0)
 	]])
-	-- Should return 6 items, alphabetically sorted
-	expect.equality(#result, 6)
+	-- Should return 7 items, alphabetically sorted
+	expect.equality(#result, 7)
 end
 
 T["placeholders"]["complete filters by prefix"] = function()
@@ -664,7 +666,153 @@ T["placeholders"]["complete returns all for no @ in arglead"] = function()
 	local result = child.lua([[
 		return _G._pi_bridge_complete("hello", "", 0)
 	]])
-	expect.equality(#result, 6)
+	expect.equality(#result, 7)
+end
+
+T["marks"] = MiniTest.new_set({
+	hooks = {
+		pre_case = function()
+			child.start({ "-u", "scripts/minimal_init.lua" })
+			-- minimal_init.lua does NOT isolate ShaDa: global marks set by a
+			-- previous test child are restored in this one. Clear all marks
+			-- so every case starts from a clean slate.
+			child.lua([[
+				for c in ('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'):gmatch('%w') do
+					pcall(vim.cmd, 'silent! delmarks ' .. c)
+				end
+			]])
+		end,
+		post_case = function()
+			child.stop()
+		end,
+	},
+})
+
+T["marks"]["@marks renders one block per set global mark, skips unset"] = function()
+	child.lua([[
+		local tmp1 = vim.fn.tempname() .. '_marks_a.lua'
+		local tmp2 = vim.fn.tempname() .. '_marks_d.lua'
+		vim.fn.writefile({ 'alpha', 'beta', 'gamma' }, tmp1)
+		vim.fn.writefile({ 'delta', 'echo' }, tmp2)
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp2))
+		vim.bo.filetype = 'lua'
+		vim.fn.setpos("'D", { 0, 2, 1, 0 })
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp1))
+		vim.bo.filetype = 'lua'
+		vim.fn.setpos("'A", { 0, 1, 1, 0 })
+		_G._marks_a = vim.loop.fs_realpath(tmp1) or tmp1
+		_G._marks_d = vim.loop.fs_realpath(tmp2) or tmp2
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@marks')
+	]])
+	local a = child.lua([[ return _G._marks_a ]])
+	local d = child.lua([[ return _G._marks_d ]])
+	local expected = "Vim mark A - " .. a .. ":1:"
+		.. "\n\n```lua\nalpha\n```\n\n"
+		.. "\nVim mark D - " .. d .. ":2:"
+		.. "\n\n```lua\necho\n```\n\n"
+	expect.equality(result, expected)
+end
+
+T["marks"]["@marks includes lowercase buffer-local marks, skips digits"] = function()
+	child.lua([[
+		local tmp = vim.fn.tempname() .. '_marks_lower.lua'
+		vim.fn.writefile({ 'p', 'q' }, tmp)
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp))
+		vim.bo.filetype = 'lua'
+		vim.fn.setpos("'b", { 0, 2, 1, 0 })
+		vim.fn.setpos("'3", { 0, 1, 1, 0 })
+		_G._marks_lower = vim.loop.fs_realpath(tmp) or tmp
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@marks')
+	]])
+	local p = child.lua([[ return _G._marks_lower ]])
+	expect.equality(result, "Vim mark b - " .. p .. ":2:\n\n```lua\nq\n```\n\n")
+end
+
+T["marks"]["@marks stays literal when no marks are set"] = function()
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('compare @marks')
+	]])
+	expect.equality(result, "compare @marks")
+end
+
+T["marks"]["@mA resolves a mark set in another buffer"] = function()
+	child.lua([[
+		local tmp1 = vim.fn.tempname() .. '_mA_cur.lua'
+		local tmp2 = vim.fn.tempname() .. '_mA_mark.lua'
+		vim.fn.writefile({ 'x', 'y' }, tmp1)
+		vim.fn.writefile({ 'markline' }, tmp2)
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp1))
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp2))
+		vim.bo.filetype = 'lua'
+		vim.fn.setpos("'A", { 0, 1, 1, 0 })
+		vim.cmd('edit ' .. vim.fn.fnameescape(tmp1))
+		_G._marks_mA_path = vim.loop.fs_realpath(tmp2) or tmp2
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('explain @mA')
+	]])
+	local p = child.lua([[ return _G._marks_mA_path ]])
+	expect.equality(result, "explain Vim mark A - " .. p .. ":1:\n\n```lua\nmarkline\n```\n\n")
+end
+
+T["marks"]["@mA stays literal when the mark is unset"] = function()
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('use @mA')
+	]])
+	expect.equality(result, "use @mA")
+end
+
+T["marks"]["@mb and @m3 resolve lowercase/digit marks in unnamed buffer"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'one', 'two' })
+		vim.bo.filetype = 'lua'
+		vim.fn.setpos("'b", { 0, 2, 1, 0 })
+		vim.fn.setpos("'3", { 0, 1, 1, 0 })
+	]])
+	local b = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@mb')
+	]])
+	local digit = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@m3')
+	]])
+	expect.equality(b, "Vim mark b - [No Name]:2:\n\n```lua\ntwo\n```\n\n")
+	expect.equality(digit, "Vim mark 3 - [No Name]:1:\n\n```lua\none\n```\n\n")
+end
+
+T["marks"]["@m alone and unset @mx stay literal"] = function()
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@m and @mx')
+	]])
+	expect.equality(result, "@m and @mx")
+end
+
+T["marks"]["@marks is listed for autocomplete, dynamic @mN is not"] = function()
+	child.lua([[ require('pi-bridge') ]])
+	local listed = child.lua([[
+		return vim.tbl_contains(require('pi-bridge.placeholders').PLACEHOLDERS, 'marks')
+	]])
+	expect.equality(listed, true)
+	-- typing @m suggests only the static placeholder
+	local result = child.lua([[
+		return _G._pi_bridge_complete("@m", "", 0)
+	]])
+	expect.equality(#result, 1)
+	expect.equality(result[1], "@marks")
+end
+
+T["marks"]["mark placeholders report no line range"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'only' })
+		vim.fn.setpos("'A", { 0, 1, 1, 0 })
+	]])
+	local no_range = child.lua([[
+		return select(2, require('pi-bridge.placeholders').resolve_with_range('@mA')) == nil
+	]])
+	expect.equality(no_range, true)
 end
 
 return T

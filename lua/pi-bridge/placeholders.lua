@@ -16,6 +16,13 @@ local function buf_filetype()
 	return ft ~= "" and ft or "text"
 end
 
+-- Same as buf_filetype, but for an arbitrary buffer (a mark may live in
+-- another file). Unloaded buffers often have no filetype yet — "text".
+local function buf_filetype_for(bufnr)
+	local ft = vim.bo[bufnr].filetype
+	return ft ~= "" and ft or "text"
+end
+
 -- Opening fence long enough to survive backtick runs in the content
 -- (CommonMark: a closing fence is a line-start run >= opening length,
 -- so opening with longest-run+1 can never be closed early).
@@ -325,6 +332,74 @@ local function resolve_content()
 	return format_fence(truncated, buf_filetype())
 end
 
+-- Look up a single mark. `name` is one char: A-Z (global), a-z / 0-9
+-- (buffer-local). Returns nil if the mark is unset (getpos lnum == 0)
+-- or its buffer no longer exists.
+local function get_mark(name)
+	local pos = vim.fn.getpos("'" .. name)
+	local bufnr, lnum = pos[1], pos[2]
+	if lnum == 0 then return nil end
+	if bufnr == 0 then bufnr = vim.api.nvim_get_current_buf() end
+	if not vim.api.nvim_buf_is_valid(bufnr) then return nil end
+	return { bufnr = bufnr, lnum = lnum }
+end
+
+-- One mark rendered as: "Vim mark A - /path/to/file.lua:42:" header, then
+-- the mark's line as a fenced block (mark's buffer filetype). The header
+-- carries file:line because ctx.range is scoped to the current buffer and
+-- would lie for a mark in another file. A mark in a NOT-LOADED buffer
+-- renders the header only: fetching its line would force-load the buffer,
+-- and nvim_buf_get_lines errors on unloaded ones.
+local function format_mark_block(name, mark)
+	local path = vim.api.nvim_buf_get_name(mark.bufnr)
+	if path == "" then path = "[No Name]" end
+	local header = string.format("Vim mark %s - %s:%d:", name, path, mark.lnum)
+	if not vim.api.nvim_buf_is_loaded(mark.bufnr) then
+		return header
+	end
+	local line = vim.api.nvim_buf_get_lines(mark.bufnr, mark.lnum - 1, mark.lnum, false)[1] or ""
+	return header .. format_fence(line, buf_filetype_for(mark.bufnr))
+end
+
+-- @marks: every set LETTER mark — globals A-Z first, then buffer-local
+-- a-z across all listed buffers (getmarklist(buf) reports one buffer's
+-- locals). Digits 0-9 are excluded: '0 and '1-'9 are auto-managed
+-- (last-exit position / jump-and-delete stack) and churn without user
+-- intent; @mN still accepts them for manual lookups. "" when none so the
+-- caller keeps the literal placeholder.
+local function resolve_marks()
+	local blocks = {}
+
+	local function add(m)
+		local name = m.mark:match("%a") -- tolerates "'A" and "A" forms
+		local bufnr, lnum = m.pos[1], m.pos[2]
+		if not name or lnum == 0 then return end
+		if bufnr == 0 then bufnr = vim.api.nvim_get_current_buf() end
+		if not vim.api.nvim_buf_is_valid(bufnr) then return end
+		table.insert(blocks, format_mark_block(name, { bufnr = bufnr, lnum = lnum }))
+	end
+
+	for _, m in ipairs(vim.fn.getmarklist()) do
+		add(m)
+	end
+	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.bo[bufnr].buflisted then
+			for _, m in ipairs(vim.fn.getmarklist(bufnr)) do
+				add(m)
+			end
+		end
+	end
+
+	return table.concat(blocks, "\n"), nil, nil
+end
+
+-- @mN: one mark, any letter/digit. Unset -> "" -> literal kept.
+local function resolve_mark(name)
+	local mark = get_mark(name)
+	if not mark then return "" end
+	return format_mark_block(name, mark), nil, nil
+end
+
 local RESOLVERS = {
 	this = resolve_this,
 	selection = resolve_selection,
@@ -332,6 +407,7 @@ local RESOLVERS = {
 	buffer = resolve_buffer,
 	buffers = resolve_buffers,
 	content = resolve_content,
+	marks = resolve_marks,
 }
 
 M.PLACEHOLDERS = vim.tbl_keys(RESOLVERS)
@@ -343,6 +419,15 @@ function M.resolve_with_range(text)
 	local spans = {}
 	local out = (string.gsub(text or "", "@(%w+)", function(key)
 		local resolver = RESOLVERS[key]
+		-- @mN: a two-char key "m<mark>" is not in RESOLVERS; dispatch to
+		-- the single-mark resolver. One-char "m" and longer keys fall
+		-- through (all static names are >=3 chars, so no collision).
+		if not resolver and #key == 2 and key:byte(1) == 109 then
+			local n = key:sub(2, 2)
+			if n:match("%w") then
+				resolver = function() return resolve_mark(n) end
+			end
+		end
 		if not resolver then
 			return nil -- unknown placeholder: keep literal
 		end

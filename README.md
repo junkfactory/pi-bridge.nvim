@@ -157,6 +157,8 @@ Include context directly in your message using placeholders:
 | `@buffers`     | Newline-separated list of open buffer paths              | `/path/a.lua\n/path/b.lua`      |
 | `@content`     | Buffer content as a fenced code block (truncated at ~900KB if large) | Full buffer contents |
 | `@diagnostics` | LSP diagnostics for current buffer                       | `L1:C1 [ERROR] unused variable` |
+| `@marks`       | One block per set letter mark (`A`-`Z` global + `a`-`z` buffer-local; digits excluded as auto-managed; literal `@marks` when none) | One block per mark   |
+| `@mN`          | Block for mark N (`A`-`Z` global; `a`-`z`, `0`-`9` buffer-local; literal when unset) | Block for mark A     |
 
 Examples:
 
@@ -168,11 +170,20 @@ Examples:
 :PiBridge review @buffer
 :PiBridge summarize @content
 :PiBridge compare @buffers
+:PiBridge explain @mA
 ```
 
 Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocomplete suggestions.
 
 `@this` and `@selection` also report their line range to pi, which appears on the `File:` header link as `File: [main.lua:12-200](/path/to/main.lua)`. `@content` is not ranged.
+
+Each mark renders as a `Vim mark X - /path/to/file:LINE:` header followed
+by the mark's line as a fenced code block in the mark's buffer's filetype.
+`@marks` covers letter marks across all listed buffers (globals `A`-`Z`
+first, then each buffer's locals); every mark it lists can also be
+addressed individually with `@mN`. `@mN` with an unset mark, and `@marks`
+with no marks set, stay literal. Mark placeholders do not report a line
+range.
 
 ## Setup
 
