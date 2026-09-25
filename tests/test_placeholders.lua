@@ -26,7 +26,7 @@ T["placeholders"]["resolve replaces @this with current line"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("look at @this")
 	]])
-	expect.equality(result, "look at \n\n```lua\nbbb\n```\n\n")
+	expect.equality(result, "look at\n\n```lua\nbbb\n```\n\n")
 end
 
 T["placeholders"]["resolve_with_range reports @this row number"] = function()
@@ -50,7 +50,7 @@ T["placeholders"]["resolve keeps surrounding text outside the fence"] = function
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("in @this replace foo with boo")
 	]])
-	expect.equality(result, "in \n\n```text\nbbb\n```\n\n replace foo with boo")
+	expect.equality(result, "in\n\n```text\nbbb\n```\n\nreplace foo with boo")
 end
 
 T["placeholders"]["resolve replaces @selection with selected text"] = function()
@@ -65,7 +65,7 @@ T["placeholders"]["resolve replaces @selection with selected text"] = function()
 	local result = child.lua([[
 		return require('pi-bridge.placeholders').resolve("explain @selection")
 	]])
-	expect.equality(result, "explain \n\n```text\nbbb\nccc\n```\n\n")
+	expect.equality(result, "explain\n\n```text\nbbb\nccc\n```\n\n")
 end
 
 T["placeholders"]["resolve keeps literal @selection when nothing is selected"] = function()
@@ -93,7 +93,7 @@ T["placeholders"]["resolve replaces @selection while visual mode is still active
 	child.lua([[vim.api.nvim_win_set_cursor(0, { 3, 2 })]])
 	expect.equality(child.fn.mode(), "v")
 	local result = child.lua([[return require('pi-bridge.placeholders').resolve("x @selection y")]])
-	expect.equality(result, "x \n\n```text\nbbb\nccc\n```\n\n y")
+	expect.equality(result, "x\n\n```text\nbbb\nccc\n```\n\ny")
 end
 
 T["placeholders"]["resolve replaces @selection with full lines while linewise visual is active"] = function()
@@ -514,7 +514,7 @@ T["placeholders"]["resolve handles multiple placeholders"] = function()
 		return require('pi-bridge.placeholders').resolve("@this and @selection")
 	]])
 	expect.equality(result:find("\n\n```text\nbbb\n```\n\n") ~= nil, true)
-	expect.equality(result, "\n\n```text\nbbb\n```\n\n and @selection")
+	expect.equality(result, "\n\n```text\nbbb\n```\n\nand @selection")
 end
 
 T["placeholders"]["resolve_with_range joins multiple ranged placeholders sorted"] = function()
@@ -708,10 +708,8 @@ T["marks"]["@marks renders one block per set global mark, skips unset"] = functi
 	]])
 	local a = child.lua([[ return _G._marks_a ]])
 	local d = child.lua([[ return _G._marks_d ]])
-	local expected = "Vim mark A - " .. a .. ":1:"
-		.. "\n\n```lua\nalpha\n```\n\n"
-		.. "\nVim mark D - " .. d .. ":2:"
-		.. "\n\n```lua\necho\n```\n\n"
+	local expected = "\n\nVim mark A - [0_marks_a.lua:1](" .. a .. "): `alpha`"
+		.. "\nVim mark D - [1_marks_d.lua:2](" .. d .. "): `echo`"
 	expect.equality(result, expected)
 end
 
@@ -729,7 +727,7 @@ T["marks"]["@marks includes lowercase buffer-local marks, skips digits"] = funct
 		return require('pi-bridge.placeholders').resolve('@marks')
 	]])
 	local p = child.lua([[ return _G._marks_lower ]])
-	expect.equality(result, "Vim mark b - " .. p .. ":2:\n\n```lua\nq\n```\n\n")
+	expect.equality(result, "\n\nVim mark b - [0_marks_lower.lua:2](" .. p .. "): `q`")
 end
 
 T["marks"]["@marks stays literal when no marks are set"] = function()
@@ -756,7 +754,7 @@ T["marks"]["@mA resolves a mark set in another buffer"] = function()
 		return require('pi-bridge.placeholders').resolve('explain @mA')
 	]])
 	local p = child.lua([[ return _G._marks_mA_path ]])
-	expect.equality(result, "explain Vim mark A - " .. p .. ":1:\n\n```lua\nmarkline\n```\n\n")
+	expect.equality(result, "explain\n\nVim mark A - [1_mA_mark.lua:1](" .. p .. "): `markline`")
 end
 
 T["marks"]["@mA stays literal when the mark is unset"] = function()
@@ -779,8 +777,34 @@ T["marks"]["@mb and @m3 resolve lowercase/digit marks in unnamed buffer"] = func
 	local digit = child.lua([[
 		return require('pi-bridge.placeholders').resolve('@m3')
 	]])
-	expect.equality(b, "Vim mark b - [No Name]:2:\n\n```lua\ntwo\n```\n\n")
-	expect.equality(digit, "Vim mark 3 - [No Name]:1:\n\n```lua\none\n```\n\n")
+	expect.equality(b, "\n\nVim mark b - [No Name]:2: `two`")
+	expect.equality(digit, "\n\nVim mark 3 - [No Name]:1: `one`")
+end
+
+T["marks"]["inline code span survives backtick runs in the marked line"] = function()
+	child.lua([[
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x ```y z', 'plain' })
+		vim.fn.setpos("'b", { 0, 1, 1, 0 })
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@mb')
+	]])
+	expect.equality(result, "\n\nVim mark b - [No Name]:1: ````x ```y z````")
+end
+
+T["marks"]["long marked lines are truncated in the inline span"] = function()
+	child.lua([[
+		local long = string.rep('a', 250)
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { long })
+		vim.fn.setpos("'b", { 0, 1, 1, 0 })
+		_G._marks_long = long
+	]])
+	local result = child.lua([[
+		return require('pi-bridge.placeholders').resolve('@mb')
+	]])
+	local long = child.lua([[ return _G._marks_long ]])
+	local expected = "\n\nVim mark b - [No Name]:1: `" .. string.rep("a", 200) .. "…`"
+	expect.equality(result, expected)
 end
 
 T["marks"]["@m alone and unset @mx stay literal"] = function()

@@ -16,13 +16,6 @@ local function buf_filetype()
 	return ft ~= "" and ft or "text"
 end
 
--- Same as buf_filetype, but for an arbitrary buffer (a mark may live in
--- another file). Unloaded buffers often have no filetype yet — "text".
-local function buf_filetype_for(bufnr)
-	local ft = vim.bo[bufnr].filetype
-	return ft ~= "" and ft or "text"
-end
-
 -- Opening fence long enough to survive backtick runs in the content
 -- (CommonMark: a closing fence is a line-start run >= opening length,
 -- so opening with longest-run+1 can never be closed early).
@@ -344,21 +337,62 @@ local function get_mark(name)
 	return { bufnr = bufnr, lnum = lnum }
 end
 
--- One mark rendered as: "Vim mark A - /path/to/file.lua:42:" header, then
--- the mark's line as a fenced block (mark's buffer filetype). The header
--- carries file:line because ctx.range is scoped to the current buffer and
--- would lie for a mark in another file. A mark in a NOT-LOADED buffer
--- renders the header only: fetching its line would force-load the buffer,
--- and nvim_buf_get_lines errors on unloaded ones.
+-- Inline code span that survives backtick runs in the content
+-- (CommonMark: a code span's delimiter run must be longer than any
+-- backtick run inside, so opening with longest-run+1 can never close
+-- early). Space-padded when the content itself starts or ends with a
+-- backtick, as CommonMark requires for safe parsing. An empty line
+-- yields an empty span ("``").
+local function inline_code(value)
+	local longest = 0
+	for run in value:gmatch("`+") do
+		if #run > longest then longest = #run end
+	end
+	local marker = string.rep("`", longest + 1)
+	if value:sub(1, 1) == "`" or value:sub(-1) == "`" then
+		return marker .. " " .. value .. " " .. marker
+	end
+	return marker .. value .. marker
+end
+
+-- Marks are context, not code to edit: cap the inline line so a huge
+-- line can't flood the prompt. Char-based slicing keeps multibyte
+-- characters whole.
+local MAX_MARK_LINE_CHARS = 200
+
+local function inline_mark_line(line)
+	if vim.fn.strchars(line) <= MAX_MARK_LINE_CHARS then return line end
+	return vim.fn.strcharpart(line, 0, MAX_MARK_LINE_CHARS) .. "…"
+end
+
+-- One mark rendered as a single line:
+--   "Vim mark A - [file.lua:42](/abs/path/to/file.lua): `line content`"
+-- mirroring the ext side's "File: [basename:line](abs)" link shape, so
+-- the ref is clickable in pi's TUI and the model still sees the abs
+-- path. Inline code instead of a fence: a mark is one line, and the
+-- fence padding that made multi-mark prompts readable as blocks is
+-- noise for a list of one-liners. The header carries file:line because
+-- ctx.range is scoped to the current buffer and would lie for a mark in
+-- another file. A mark in a NOT-LOADED buffer renders the header only:
+-- fetching its line would force-load the buffer, and
+-- nvim_buf_get_lines errors on unloaded ones. Unnamed buffers get a
+-- plain "[No Name]:LINE:" header — there is no path to link to.
+-- Block separation (blank line before the header) is added by the
+-- callers, mirroring how format_fence pads its substitutions.
 local function format_mark_block(name, mark)
 	local path = vim.api.nvim_buf_get_name(mark.bufnr)
-	if path == "" then path = "[No Name]" end
-	local header = string.format("Vim mark %s - %s:%d:", name, path, mark.lnum)
+	local header
+	if path == "" then
+		header = string.format("Vim mark %s - [No Name]:%d:", name, mark.lnum)
+	else
+		local label = vim.fn.fnamemodify(path, ":t") .. ":" .. mark.lnum
+		header = string.format("Vim mark %s - [%s](%s):", name, label, path)
+	end
 	if not vim.api.nvim_buf_is_loaded(mark.bufnr) then
 		return header
 	end
 	local line = vim.api.nvim_buf_get_lines(mark.bufnr, mark.lnum - 1, mark.lnum, false)[1] or ""
-	return header .. format_fence(line, buf_filetype_for(mark.bufnr))
+	return header .. " " .. inline_code(inline_mark_line(line))
 end
 
 -- @marks: every set LETTER mark — globals A-Z first, then buffer-local
@@ -390,14 +424,21 @@ local function resolve_marks()
 		end
 	end
 
-	return table.concat(blocks, "\n"), nil, nil
+	-- "\n\n" before the first header keeps it on its own line when the
+	-- placeholder fires mid-sentence, with a blank line of separation like
+	-- a fence gets. Blocks are one-liners now, so the "\n" join lists
+	-- them on consecutive lines. No marks -> "" so the caller keeps the
+	-- literal.
+	if #blocks == 0 then return "", nil, nil end
+	return "\n\n" .. table.concat(blocks, "\n"), nil, nil
 end
 
 -- @mN: one mark, any letter/digit. Unset -> "" -> literal kept.
 local function resolve_mark(name)
 	local mark = get_mark(name)
 	if not mark then return "" end
-	return format_mark_block(name, mark), nil, nil
+	-- Same padding resolve_marks gives its first block.
+	return "\n\n" .. format_mark_block(name, mark), nil, nil
 end
 
 local RESOLVERS = {
@@ -415,9 +456,17 @@ table.sort(M.PLACEHOLDERS)
 
 -- Like resolve(), but also returns a compact range string for the ranged
 -- placeholders that fired ("25", "12-200", "25,40-45"), or nil.
+--
+-- The match also captures the spaces/tabs hugging the placeholder. When
+-- the substitution is a block (fence or mark header, always starting
+-- with "\n"), that adjacent whitespace is dropped: the block brings its
+-- own blank-line padding, so "combining @this with" must not render as
+-- "combining \n\n```...```\n\n with". Inline values (@buffer, @diagnostics,
+-- ...) keep their surrounding spaces — they read like words in the
+-- sentence ("see @buffer for details").
 function M.resolve_with_range(text)
 	local spans = {}
-	local out = (string.gsub(text or "", "@(%w+)", function(key)
+	local out = (string.gsub(text or "", "([ \t]*)@(%w+)([ \t]*)", function(pre, key, post)
 		local resolver = RESOLVERS[key]
 		-- @mN: a two-char key "m<mark>" is not in RESOLVERS; dispatch to
 		-- the single-mark resolver. One-char "m" and longer keys fall
@@ -429,7 +478,7 @@ function M.resolve_with_range(text)
 			end
 		end
 		if not resolver then
-			return nil -- unknown placeholder: keep literal
+			return nil -- unknown placeholder: keep literal (with its spaces)
 		end
 		-- A resolver that errors must not break the whole send: fall
 		-- back to the literal placeholder like the empty case below.
@@ -447,7 +496,10 @@ function M.resolve_with_range(text)
 		if start_line then
 			table.insert(spans, { start = start_line, ["end"] = end_line })
 		end
-		return value
+		if value:sub(1, 1) == "\n" then
+			return value -- block: drop the captured surrounding spaces
+		end
+		return pre .. value .. post
 	end))
 	table.sort(spans, function(a, b)
 		return a.start < b.start or (a.start == b.start and a["end"] < b["end"])

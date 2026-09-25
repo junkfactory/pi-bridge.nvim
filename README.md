@@ -149,16 +149,16 @@ All responses render in pi's TUI — streaming text, tool calls, diffs, etc.
 
 Include context directly in your message using placeholders:
 
-| Placeholder    | Replaces with                                            | Example                         |
-|----------------|----------------------------------------------------------|---------------------------------|
-| `@this`        | Current line as a fenced code block (filetype language)  | ` ```lua local x = 1 ``` `      |
-| `@selection`   | Visual selection as a fenced code block (empty in normal mode) | Fenced selection text     |
-| `@buffer`      | Absolute path to current buffer                          | `/path/to/file.lua`             |
-| `@buffers`     | Newline-separated list of open buffer paths              | `/path/a.lua\n/path/b.lua`      |
-| `@content`     | Buffer content as a fenced code block (truncated at ~900KB if large) | Full buffer contents |
-| `@diagnostics` | LSP diagnostics for current buffer                       | `L1:C1 [ERROR] unused variable` |
-| `@marks`       | One block per set letter mark (`A`-`Z` global + `a`-`z` buffer-local; digits excluded as auto-managed; literal `@marks` when none) | One block per mark   |
-| `@mN`          | Block for mark N (`A`-`Z` global; `a`-`z`, `0`-`9` buffer-local; literal when unset) | Block for mark A     |
+| Placeholder    | Replaces with                                                                                                                      | Example                         |
+|----------------|------------------------------------------------------------------------------------------------------------------------------------|---------------------------------|
+| `@this`        | Current line as a fenced code block (filetype language)                                                                            | ` ```lua local x = 1 ``` `      |
+| `@selection`   | Visual selection as a fenced code block (empty in normal mode)                                                                     | Fenced selection text           |
+| `@buffer`      | Absolute path to current buffer                                                                                                    | `/path/to/file.lua`             |
+| `@buffers`     | Newline-separated list of open buffer paths                                                                                        | `/path/a.lua\n/path/b.lua`      |
+| `@content`     | Buffer content as a fenced code block (truncated at ~900KB if large)                                                               | Full buffer contents            |
+| `@diagnostics` | LSP diagnostics for current buffer                                                                                                 | `L1:C1 [ERROR] unused variable` |
+| `@marks`       | One block per set letter mark (`A`-`Z` global + `a`-`z` buffer-local; digits excluded as auto-managed; literal `@marks` when none) | One block per mark              |
+| `@mN`          | Block for mark N (`A`-`Z` global; `a`-`z`, `0`-`9` buffer-local; literal when unset)                                               | Block for mark A                |
 
 Examples:
 
@@ -177,9 +177,7 @@ Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocom
 
 `@this` and `@selection` also report their line range to pi, which appears on the `File:` header link as `File: [main.lua:12-200](/path/to/main.lua)`. `@content` is not ranged.
 
-Each mark renders as a `Vim mark X - /path/to/file:LINE:` header followed
-by the mark's line as a fenced code block in the mark's buffer's filetype.
-`@marks` covers letter marks across all listed buffers (globals `A`-`Z`
+Each mark renders as a single line: a `Vim mark X - [basename:LINE](/abs/path):` header mirroring the `File:` link shape (clickable in pi's TUI), followed by the mark's line as an inline code span — truncated at 200 characters, since marks are context rather than code to edit. `@marks` covers letter marks across all listed buffers (globals `A`-`Z`
 first, then each buffer's locals); every mark it lists can also be
 addressed individually with `@mN`. `@mN` with an unset mark, and `@marks`
 with no marks set, stay literal. Mark placeholders do not report a line
@@ -353,10 +351,10 @@ Turns typed directly into pi auto-pass-through (no mirror, no stall) — the mir
 
 ### Surfaces
 
-| Kind           | What appears in Neovim                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `select`       | `vim.ui.select` picker — **full original labels** as items, with a `format_item` that display-trims labels longer than 80 chars to `first 77 chars + "..."`. The picker returns the full untrimmed label, so the value sent back to pi is never truncated. Plugin pickers (dressing, snacks, fzf-lua, ...) work untouched. The stock `vim.ui.select` (which blocks in `inputlist()` and cannot be dismissed programmatically) is replaced by a minimal owned float with numbered keys `1..9` + `<Esc>`.                                                         |
-| `confirm`      | Same as `select`, folded in as a 2-option picker (`Yes` / `No`). Cancelled sends `cancelled: true` and the ext side resolves to `false` (matches pi's own RPC semantics).                                                                                                                                                                                                                                                                                                                                                                                       |
+| Kind           | What appears in Neovim                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `select`       | `vim.ui.select` picker — **full original labels** as items, with a `format_item` that display-trims labels longer than 80 chars to `first 77 chars + "..."`. The picker returns the full untrimmed label, so the value sent back to pi is never truncated. Plugin pickers (dressing, snacks, fzf-lua, ...) work untouched. The stock `vim.ui.select` (which blocks in `inputlist()` and cannot be dismissed programmatically) is replaced by a minimal owned float with numbered keys `1..9` + `<Esc>`.                                                                                                                                         |
+| `confirm`      | Same as `select`, folded in as a 2-option picker (`Yes` / `No`). Cancelled sends `cancelled: true` and the ext side resolves to `false` (matches pi's own RPC semantics).                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `custom`       | A passive, focused, message-only notice float: "π pi needs your input — answer in the pi window". pi owns the dialog and its navigation completely; no dialog content or re-renders are mirrored, and no key is forwarded. The notice honors **only `<Esc>`**: it closes the notice and injects an Esc keypress into the pi-side component (`ui_prompt_response {id, key = "\x1b"}`), so the component's own Esc handler decides what abort means (e.g. deny for pi-permission-system). Any other key is swallowed while the notice is focused. If the dialog resolves in pi first, `ui_prompt_resolved` closes the notice and breaks the loop. |
 
 ### Handshake
