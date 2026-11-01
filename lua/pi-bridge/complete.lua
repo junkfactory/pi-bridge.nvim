@@ -81,4 +81,28 @@ function M.complete(arglead, dispatcher)
 	return out
 end
 
+-- 0-based byte column where the @placeholder / path token under the cursor
+-- starts, or nil when the token is not completable.
+function M.token_start(line, col)
+	if type(line) ~= "string" or type(col) ~= "number" then return nil end
+	local head = line:sub(1, col)
+	local token = head:match("([^%s]*)$")
+	if token == nil or token == "" then return nil end
+	local start = col - #token
+	if token:match("^@%w*$") or M.path_like(token) then return start end
+	return nil
+end
+
+-- 'completefunc' adapter: vim.bo.completefunc = "v:lua._pi_bridge_input_complete".
+function M.completefunc(findstart, base)
+	if findstart == 1 then
+		local line = vim.api.nvim_get_current_line()
+		local col = vim.api.nvim_win_get_cursor(0)[2]
+		local start = M.token_start(line, col)
+		if start == nil then return -3 end -- cancel silently, leave completion mode
+		return start
+	end
+	return M.complete(base)
+end
+
 return M

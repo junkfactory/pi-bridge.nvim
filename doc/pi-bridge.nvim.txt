@@ -72,6 +72,22 @@ Visual mode: sends prompt + selection as context.
 
 Default keymap: <leader>ai (normal + visual mode)
 
+                                            *pi-bridge-prompt-input*
+Prompt box keys ~
+	The interactive prompt opens a centered box: text soft-wraps and the
+	box grows vertically up to 10 rows, then scrolls. Keys in the box:
+
+	<CR>                Send (accepts a completion candidate when visible)
+	<C-j> / <S-CR>      Insert a new line
+	<Tab>               Complete the `@placeholder`/path token at the cursor
+	<S-Tab>             Select the previous completion candidate
+	<Up> / <Down>       Move by display row (follows wrapped lines)
+	<Esc> <Esc> / q     Cancel without sending
+	<C-c>               Cancel immediately
+
+Completion applies to the `@placeholder` token or the path under the
+cursor; plain prose completes nothing.
+
 ==============================================================================
 4. Config                                                     *pi-bridge-config*
 

@@ -206,6 +206,45 @@ T["ui"]["on_error shows notification with ERROR level"] = function()
 	expect.equality(notifs[1].level, vim.log.levels.ERROR)
 end
 
+-- Border accent resolver: each case resets PiBridgeFloatBorder so the
+-- previous case's own definition does not leak in.
+T["ui"]["border_hl links Comment when no snacks and no user override"] = function()
+	child.lua("vim.api.nvim_set_hl(0, 'PiBridgeFloatBorder', {})")
+	local name = child.lua("return require('pi-bridge.ui').border_hl()")
+	expect.equality(name, "PiBridgeFloatBorder")
+	local def = child.lua("return vim.api.nvim_get_hl(0, { name = 'PiBridgeFloatBorder' })")
+	expect.equality(def.link, "Comment")
+end
+
+T["ui"]["border_hl follows the snacks border when its group is themed"] = function()
+	child.lua("vim.api.nvim_set_hl(0, 'PiBridgeFloatBorder', {})")
+	-- Simulate an active snacks: the group exists, themed by the colorscheme.
+	child.lua("vim.api.nvim_set_hl(0, 'SnacksInputBorder', { fg = '#e0af68' })")
+	child.lua("return require('pi-bridge.ui').border_hl()")
+	local def = child.lua("return vim.api.nvim_get_hl(0, { name = 'PiBridgeFloatBorder' })")
+	expect.equality(def.link, "SnacksInputBorder")
+end
+
+T["ui"]["border_hl leaves a user definition with concrete colors alone"] = function()
+	child.lua("vim.api.nvim_set_hl(0, 'SnacksInputBorder', { fg = '#e0af68' })")
+	child.lua("vim.api.nvim_set_hl(0, 'PiBridgeFloatBorder', { fg = '#ff0000' })")
+	local name = child.lua("return require('pi-bridge.ui').border_hl()")
+	expect.equality(name, "PiBridgeFloatBorder")
+	local def = child.lua("return vim.api.nvim_get_hl(0, { name = 'PiBridgeFloatBorder' })")
+	expect.equality(def.fg, 0xff0000)
+	expect.equality(def.link, nil)
+end
+
+T["ui"]["border_hl resolves again when the user override is only a link"] = function()
+	-- A bare link definition is not protected: it is re-resolved, so a
+	-- colorscheme switch (or user link) between opens does not pin an
+	-- old accent. Users who want a pinned accent set concrete colors.
+	child.lua("vim.api.nvim_set_hl(0, 'PiBridgeFloatBorder', { default = true, link = 'Comment' })")
+	child.lua("return require('pi-bridge.ui').border_hl()")
+	local def = child.lua("return vim.api.nvim_get_hl(0, { name = 'PiBridgeFloatBorder' })")
+	expect.equality(def.link, "Comment") -- fallback: no SnacksInputBorder in this child
+end
+
 T["ui"]["on_error uses default message when empty"] = function()
 	child.lua([[
 		_G.notifications = {}

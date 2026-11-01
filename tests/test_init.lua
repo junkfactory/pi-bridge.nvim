@@ -594,10 +594,18 @@ T["init"]["dismiss_all called on remote disconnect"] = function()
 		mirror.dismiss_all = function()
 			_G._dismiss_count = _G._dismiss_count + 1
 		end
+		-- Stub input.close the same way: a remote disconnect while the
+		-- prompt float is open must close it.
+		local input = require('pi-bridge.input')
+		_G._input_close_count = 0
+		input.close = function()
+			_G._input_close_count = _G._input_close_count + 1
+		end
 	]], path, path))
 
 	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
 	expect.equality(child.lua("return _G._dismiss_count"), 0)
+	expect.equality(child.lua("return _G._input_close_count"), 0)
 
 	-- Stop the server: client observes EOF, init.lua's on_disconnect
 	-- callback fires once.
@@ -605,6 +613,7 @@ T["init"]["dismiss_all called on remote disconnect"] = function()
 	child.lua("vim.wait(800, function() return _G._dismiss_count >= 1 end, 30)")
 
 	expect.equality(child.lua("return _G._dismiss_count"), 1)
+	expect.equality(child.lua("return _G._input_close_count"), 1)
 
 	child.lua("require('pi-bridge.socket').disconnect()")
 	helpers.rmdir(dir)
@@ -634,6 +643,13 @@ T["init"]["local disconnect does not call dismiss_all"] = function()
 		mirror.dismiss_all = function()
 			_G._dismiss_count = _G._dismiss_count + 1
 		end
+		-- Stub input.close the same way: a local disconnect (VimLeavePre
+		-- path) must not close the prompt float.
+		local input = require('pi-bridge.input')
+		_G._input_close_count = 0
+		input.close = function()
+			_G._input_close_count = _G._input_close_count + 1
+		end
 	]], path, path))
 
 	expect.equality(child.lua("return require('pi-bridge.socket').is_connected()"), true)
@@ -647,6 +663,7 @@ T["init"]["local disconnect does not call dismiss_all"] = function()
 	vim.uv.sleep(300)
 
 	expect.equality(child.lua("return _G._dismiss_count"), 0)
+	expect.equality(child.lua("return _G._input_close_count"), 0)
 
 	child.lua("_G._test_server.stop()")
 	helpers.rmdir(dir)

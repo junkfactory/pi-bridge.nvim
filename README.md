@@ -145,6 +145,13 @@ Or use the command:
 
 All responses render in pi's TUI — streaming text, tool calls, diffs, etc.
 
+### Prompt input
+
+The interactive prompt opens a centered box: text soft-wraps and the box grows
+vertically up to 10 rows, then scrolls. `<CR>` sends, `<C-j>`/`<S-CR>` insert
+a new line, `<Tab>` completes, and `<Esc>` `<Esc>` or `<C-c>` cancels without
+sending.
+
 ### Placeholders
 
 Include context directly in your message using placeholders:
@@ -173,7 +180,7 @@ Examples:
 :PiBridge explain @mA
 ```
 
-Typing `@` completes placeholders, and unknown `@tokens` still pass through unchanged. A token that contains `/` or starts with `~`, `./`, or `../` completes filesystem paths instead: files and directories (directories insert with a trailing `/` so you can keep descending), plus absolute paths of open listed buffers sharing the prefix. Separators are required: plain words and an empty prompt never trigger completion. Known limitation: paths containing spaces fragment across cmdline word boundaries after insertion.
+Typing `@` completes placeholders, and unknown `@tokens` still pass through unchanged. A token that contains `/` or starts with `~`, `./`, or `../` completes filesystem paths instead: files and directories (directories insert with a trailing `/` so you can keep descending), plus absolute paths of open listed buffers sharing the prefix. In the prompt box, completion applies to the `@placeholder` token or the path under the cursor: plain prose completes nothing.
 
 `@this` and `@selection` also report their line range to pi, which appears on the `File:` header link as `File: [main.lua:12-200](/path/to/main.lua)`. `@content` is not ranged.
 
@@ -243,6 +250,18 @@ keymaps = { prompt = "<leader>p" },
 -- Disable defaults (use :PiBridge command)
 keymaps = false,
 ```
+
+Inside the prompt box:
+
+| Key                   | Action                                               |
+|-----------------------|------------------------------------------------------|
+| `<CR>`                | Send (accepts a completion candidate when visible)   |
+| `<C-j>` / `<S-CR>`    | Insert a new line                                    |
+| `<Tab>`               | Complete the `@placeholder`/path token at the cursor |
+| `<S-Tab>`             | Select the previous completion candidate             |
+| `<Up>` / `<Down>`     | Move by display row (follows wrapped lines)          |
+| `<Esc>` `<Esc>` / `q` | Cancel without sending                               |
+| `<C-c>`               | Cancel immediately                                   |
 
 ## How It Works
 

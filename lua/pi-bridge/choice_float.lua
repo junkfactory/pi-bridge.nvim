@@ -119,10 +119,11 @@ function M.draw_box(opts)
 	local row = math.max(0, math.floor((total_lines - height) / 2) - 1)
 	local col = math.max(0, math.floor((total_cols - width) / 2))
 
-	-- Body text keeps the normal NormalFloat color; dim only the border
-	-- (FloatBorder -> PiBridgeFloatBorder, default-linked to Comment).
-	-- FloatTitle (the border title) is left as-is.
-	vim.api.nvim_set_hl(0, "PiBridgeFloatBorder", { default = true, link = "Comment" })
+	-- Body text keeps the normal NormalFloat color; FloatTitle (the
+	-- border title) is left as-is. The border links to the shared
+	-- pi-bridge border group, whose source (snacks' themed accent or a
+	-- dim Comment) is resolved in ui.border_hl() on every open.
+	local border_hl = require("pi-bridge.ui").border_hl()
 	local win = vim.api.nvim_open_win(buf, true, {
 		relative = "editor",
 		width = width,
@@ -135,9 +136,9 @@ function M.draw_box(opts)
 		title_pos = "center",
 	})
 	-- winhighlight is a window option, not an nvim_open_win config key.
-	-- Map only FloatBorder so the frame is dimmed while body/title stay
-	-- their normal colors.
-	vim.wo[win].winhl = "FloatBorder:PiBridgeFloatBorder"
+	-- Map only FloatBorder so the frame keeps the chosen accent while
+	-- body/title stay their normal colors.
+	vim.wo[win].winhl = "FloatBorder:" .. border_hl
 	return win, buf
 end
 

@@ -185,4 +185,81 @@ T["complete"]["wiring: _G._pi_bridge_complete serves @placeholders"] = function(
 	expect.equality(r.got, r.expected)
 end
 
+-- 'completefunc' adapter: token_start is pure Lua, completefunc needs a
+-- buffer so findstart==1 can read line and cursor from the current window.
+
+T["token_start"] = MiniTest.new_set({
+	hooks = {
+		pre_case = function()
+			child.start({ "-u", "scripts/minimal_init.lua" })
+		end,
+		post_case = function()
+			child.stop()
+		end,
+	},
+})
+
+T["token_start"]["nil or blank heads return nil"] = function()
+	-- tostring, because RPC turns nils into nothing
+	local nil_cases = child.lua([[local m = require('pi-bridge.complete')
+		return { tostring(m.token_start(nil, 1)), tostring(m.token_start('@th', nil)), tostring(m.token_start(' ', 1)) }]])
+	expect.equality(nil_cases, { 'nil', 'nil', 'nil' })
+end
+
+T["token_start"]["@ and @th start at column 0; mid-token cursor completes the prefix"] = function()
+	local r = child.lua([[local m = require('pi-bridge.complete')
+		return { at = m.token_start('@', 1), th = m.token_start('@th', 3), mid = m.token_start('@th', 2) }]])
+	expect.equality(r, { at = 0, th = 0, mid = 0 })
+end
+
+T["token_start"]["token after prose and ./path lead report the right start"] = function()
+	local r = child.lua([[local m = require('pi-bridge.complete')
+		return { prose = m.token_start('see @th', 7), path = m.token_start('./lib/x', 7) }]])
+	expect.equality(r, { prose = 4, path = 0 })
+end
+
+T["token_start"]["plain words are not completable"] = function()
+	local got = child.lua([[return tostring(require('pi-bridge.complete')['token_start']('plain words', 11))]])
+	expect.equality(got, 'nil')
+end
+
+T["completefunc"] = MiniTest.new_set({
+	hooks = {
+		pre_case = function()
+			child.start({ "-u", "scripts/minimal_init.lua" })
+		end,
+		post_case = function()
+			child.stop()
+		end,
+	},
+})
+
+T["completefunc"]["findstart==1 returns the byte column in a scratch buffer"] = function()
+	local start = child.lua([[vim.cmd('new')
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'see @th' })
+		vim.api.nvim_win_set_cursor(0, { 1, 7 })
+		return require('pi-bridge.complete').completefunc(1, '')]])
+	expect.equality(start, 4)
+end
+
+T["completefunc"]["findstart==1 returns -3 for plain prose"] = function()
+	local code = child.lua([[vim.cmd('new')
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'plain words' })
+		vim.api.nvim_win_set_cursor(0, { 1, 11 })
+		return require('pi-bridge.complete').completefunc(1, '')]])
+	expect.equality(code, -3)
+end
+
+T["completefunc"]["findstart==0 returns the placeholder matches"] = function()
+	local r = child.lua([[local names = require('pi-bridge.placeholders').PLACEHOLDERS
+		local got = require('pi-bridge.complete').completefunc(0, '@th')
+		local all_prefixed = #got > 0
+		for _, c in ipairs(got) do
+			if c:sub(1, 3) ~= '@th' then all_prefixed = false end
+		end
+		return { got = got, all_prefixed = all_prefixed }]])
+	expect.equality(#r.got > 0, true)
+	expect.equality(r.all_prefixed, true)
+end
+
 return T

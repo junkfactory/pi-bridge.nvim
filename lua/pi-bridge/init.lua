@@ -105,6 +105,7 @@ local function ensure_connection(cb)
 			)
 			pcall(approval.on_remote_disconnect)
 			pcall(mirror.dismiss_all)
+			pcall(require("pi-bridge.input").close, "pi disconnected")
 		end)
 		log.info("remote disconnect from pi session")
 	end
@@ -270,6 +271,10 @@ function M.setup(opts)
 	log.info("setup complete")
 end
 
+_G._pi_bridge_input_complete = function(findstart, base)
+	return require("pi-bridge.complete").completefunc(findstart, base)
+end
+
 function M.prompt(opts)
 	if not config then
 		vim.notify("𝜋 setup() not called", vim.log.levels.ERROR)
@@ -324,14 +329,7 @@ function M.prompt(opts)
 	if opts.text then
 		send(opts.text)
 	else
-		vim.ui.input({
-			prompt = "π > ",
-			completion = "customlist,v:lua._pi_bridge_complete",
-		}, function(input)
-			vim.schedule(function()
-				send(input)
-			end)
-		end)
+		require("pi-bridge.input").open({ on_submit = send })
 	end
 end
 
