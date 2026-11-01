@@ -661,12 +661,12 @@ T["placeholders"]["complete returns empty for unknown prefix"] = function()
 	expect.equality(#result, 0)
 end
 
-T["placeholders"]["complete returns all for no @ in arglead"] = function()
+T["placeholders"]["complete is empty for plain words in arglead"] = function()
 	child.lua([[ require('pi-bridge') ]])
 	local result = child.lua([[
 		return _G._pi_bridge_complete("hello", "", 0)
 	]])
-	expect.equality(#result, 7)
+	expect.equality(#result, 0)
 end
 
 T["marks"] = MiniTest.new_set({

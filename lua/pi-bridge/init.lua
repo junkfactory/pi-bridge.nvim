@@ -189,22 +189,7 @@ local function register_command()
 end
 
 _G._pi_bridge_complete = function(arglead, _cmdline, _cursorpos)
-	local names = require("pi-bridge.placeholders").PLACEHOLDERS
-	local prefix = arglead:match("@(%w*)$")
-	if not prefix then
-		local all = {}
-		for _, name in ipairs(names) do
-			table.insert(all, "@" .. name)
-		end
-		return all
-	end
-	local matches = {}
-	for _, name in ipairs(names) do
-		if name:find(prefix, 1, true) == 1 then
-			table.insert(matches, "@" .. name)
-		end
-	end
-	return matches
+	return require("pi-bridge.complete").complete(arglead)
 end
 
 function M.setup(opts)

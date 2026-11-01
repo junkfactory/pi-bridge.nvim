@@ -173,7 +173,7 @@ Examples:
 :PiBridge explain @mA
 ```
 
-Unknown `@tokens` pass through unchanged. Typing `@` in the prompt shows autocomplete suggestions.
+Typing `@` completes placeholders, and unknown `@tokens` still pass through unchanged. A token that contains `/` or starts with `~`, `./`, or `../` completes filesystem paths instead: files and directories (directories insert with a trailing `/` so you can keep descending), plus absolute paths of open listed buffers sharing the prefix. Separators are required: plain words and an empty prompt never trigger completion. Known limitation: paths containing spaces fragment across cmdline word boundaries after insertion.
 
 `@this` and `@selection` also report their line range to pi, which appears on the `File:` header link as `File: [main.lua:12-200](/path/to/main.lua)`. `@content` is not ranged.
 
