@@ -68,8 +68,39 @@ T["prompt_input"]["open opens an entered float titled ' π > '"] = function()
 	-- Short text starts at one row; wrapping and a zero scrolloff are what
 	-- keep the box growing vertically instead of horizontally.
 	expect.equality(cfg.height, 1)
+	-- Top-anchored: the box opens at row 1, not vertically centered.
+	expect.equality(cfg.row, 1)
 	expect.equality(child.lua("return vim.wo.wrap"), true)
 	expect.equality(child.lua("return vim.wo.scrolloff"), 0)
+	expect.equality(child.lua("return vim.b.completion"), false)
+end
+
+T["prompt_input"]["completion = true opts out of the plugin disable"] = function()
+	expect.equality(child.lua(
+		"return input.open({ on_submit = _G.in_on_submit, completion = true })"
+	), true)
+	-- The buffer-local flag is never set: completion plugins keep firing.
+	expect.equality(child.lua("return vim.b.completion == nil"), true)
+end
+
+T["prompt_input"]["nvim-cmp disable targets the input buffer"] = function()
+	-- Child has no cmp installed: preload a recording stub so the pcall
+	-- path in M.open runs instead of being absorbed.
+	child.lua([[
+		_G._cmp_buffer_calls = {}
+		package.loaded.cmp = {
+			setup = { buffer = function()
+				_G._cmp_buffer_calls[#_G._cmp_buffer_calls + 1] = vim.api.nvim_get_current_buf()
+			end },
+		}
+	]])
+	expect.equality(open(), true)
+	-- cmp.setup.buffer must have run with the input buffer current (the
+	-- float is current after open), not the caller's buffer.
+	expect.equality(child.lua(
+		"return _G._cmp_buffer_calls ~= nil and #_G._cmp_buffer_calls == 1"
+			.. " and _G._cmp_buffer_calls[1] == vim.api.nvim_get_current_buf()"
+	), true)
 end
 
 T["prompt_input"]["second open is refused while a box is open"] = function()
@@ -89,6 +120,8 @@ T["prompt_input"]["height starts at 1, grows with wrapping, caps at 10"] = funct
 	wait_for("vim.api.nvim_win_get_config(0).height > 1")
 	expect.equality(height() > 1, true)
 	expect.equality(height(), 5)
+	-- Growth expands downward: the top row stays put.
+	expect.equality(child.lua("return vim.api.nvim_win_get_config(0).row"), 1)
 
 	-- Far longer than MAX_HEIGHT rows: the box stops at 10 and scrolls.
 	child.type_keys(string.rep("y", 500))

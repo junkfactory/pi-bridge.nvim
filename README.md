@@ -232,6 +232,12 @@ require("pi-bridge").setup({
   -- PI_BRIDGE_UI_PROMPT_MIRROR env var for the other direction.
   ui_prompt_mirror = true,
 
+  -- Input completion: completion plugins (blink.cmp / nvim-cmp) are
+  -- disabled inside the prompt box so typing stays quiet; manual <Tab>
+  -- completion (`@` placeholders, paths) is unaffected. Set true to let
+  -- them auto-trigger while typing.
+  input_completion = false,
+
   -- Send/receive notifications: show a toast when pi starts/finishes
   -- working. Set false to silence (on base Neovim toasts require
   -- Enter to dismiss). Errors and disconnect warnings are always shown.

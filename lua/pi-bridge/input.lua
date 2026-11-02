@@ -7,15 +7,19 @@
 -- snacks exposes no wrap or height-growth lever, so pi-bridge owns the
 -- surface here, the same way `choice_float` already owns the pickers.
 --
--- Shape: one centered, fixed-width (WIDTH, clamped to the editor)
+-- Shape: one top-anchored, fixed-width (WIDTH, clamped to the editor)
 -- float over a plain scratch buffer with 'wrap' and 'linebreak'. The
 -- height follows the wrapped row count (1..MAX_HEIGHT) via
 -- `nvim_win_text_height` on every text change and on editor resize,
--- then the box scrolls. Geometry is only pushed when it actually
+-- growing downward from the fixed top row as text wraps, then the box
+-- scrolls. Geometry is only pushed when it actually
 -- changed, so typing does not trigger a redraw storm.
 --
 -- No padding is written into the buffer: the buffer holds exactly the
 -- prompt text, so submit, cursor and completion columns stay honest.
+-- Completion plugins are disabled inside the box unless `completion`
+-- is set true (setup default `input_completion = false`); manual <Tab>
+-- completion always works.
 --
 -- Lifecycle:
 --   M.open({ on_submit = fn })  open the box; returns false when
@@ -38,6 +42,7 @@ local M = {}
 -- before the box starts scrolling.
 local WIDTH = 60
 local MAX_HEIGHT = 10
+local TOP_ROW = 1
 local AUGROUP = "pi-bridge-input"
 
 -- Single-flight state; nil when nothing is open.
@@ -48,9 +53,10 @@ local function box_width()
 	return math.max(1, math.min(WIDTH, vim.o.columns - 4))
 end
 
--- Top-left corner that centers a width x height box on the screen.
-local function box_origin(width, height)
-	local row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1)
+-- Top-anchored, horizontally centered corner: the row never moves, so
+-- height growth expands the box downward (snacks.input placement).
+local function box_origin(width)
+	local row = TOP_ROW
 	local col = math.max(0, math.floor((vim.o.columns - width) / 2))
 	return row, col
 end
@@ -108,7 +114,7 @@ local function resize()
 		-- narrowed editor (VimResized) would get a stale, too-short
 		-- box until the next text change. nvim_win_text_height needs
 		-- no redraw after nvim_win_set_config (verified on nvim 0.12).
-		row, col = box_origin(width, st.height)
+		row, col = box_origin(width)
 		local ok, err = pcall(vim.api.nvim_win_set_config, st.win, {
 			relative = "editor",
 			row = row,
@@ -127,7 +133,7 @@ local function resize()
 	end
 	if height == st.height then return end
 	st.height = height
-	row, col = box_origin(width, height)
+	row, col = box_origin(width)
 	local ok, err = pcall(vim.api.nvim_win_set_config, st.win, {
 		relative = "editor",
 		row = row,
@@ -258,11 +264,26 @@ function M.open(opts)
 	-- completion behaviour under us.
 	vim.bo[buf].completefunc = "v:lua._pi_bridge_input_complete"
 
+	-- No auto-complete while typing: blink.cmp honors the buffer-local
+	-- `completion` flag (same trick snacks.input uses); nvim.cmp gets a
+	-- buffer-local disable when installed. Manual <Tab> completion below
+	-- is unaffected. `completion = true` opts out of the disable — it is
+	-- driven by setup's input_completion default (false).
+	if not opts.completion then
+		vim.b[buf].completion = false
+		-- cmp.setup.buffer targets the CURRENT buffer (cmp/init.lua), so
+		-- pin the call to the input buffer — at this point in M.open the
+		-- float does not exist yet and the current buffer is the caller's.
+		pcall(vim.api.nvim_buf_call, buf, function()
+			require("cmp").setup.buffer({ enabled = false })
+		end)
+	end
+
 	local border_hl = require("pi-bridge.ui").border_hl()
 
 	local width = box_width()
 	local height = 1
-	local row, col = box_origin(width, height)
+	local row, col = box_origin(width)
 	local prev_win = vim.api.nvim_get_current_win()
 	local ok, win = pcall(vim.api.nvim_open_win, buf, true, {
 		relative = "editor",

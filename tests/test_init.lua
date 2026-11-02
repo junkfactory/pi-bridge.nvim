@@ -345,6 +345,49 @@ T["init"]["setup rejects non-boolean edit_approval_prompt"] = function()
 	expect.equality(ok, false)
 end
 
+T["init"]["input_completion defaults to false"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error' })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.input_completion, false)
+end
+
+T["init"]["prompt passes input_completion into input.open"] = function()
+	local calls = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', input_completion = true })
+		-- Capture input.open instead of opening a real float. Only the
+		-- serializable flag is recorded: opts carries the `send` closure,
+		-- which cannot cross back to the parent.
+		_G._open_completions = {}
+		local input = require('pi-bridge.input')
+		input.open = function(opts)
+			_G._open_completions[#_G._open_completions + 1] = opts ~= nil and opts.completion or false
+			return true
+		end
+		require('pi-bridge').prompt({})
+		return _G._open_completions
+	]])
+	expect.equality(#calls, 1)
+	expect.equality(calls[1], true)
+end
+
+T["init"]["input_completion can be set to true"] = function()
+	local config = child.lua([[
+		require('pi-bridge').setup({ log_level = 'error', input_completion = true })
+		return require('pi-bridge').get_config()
+	]])
+	expect.equality(config.input_completion, true)
+end
+
+T["init"]["setup rejects non-boolean input_completion"] = function()
+	local ok = child.lua([[
+		local ok, err = pcall(require('pi-bridge').setup, { input_completion = 'yes' })
+		return ok
+	]])
+	expect.equality(ok, false)
+end
+
 T["init"]["notify defaults to true"] = function()
 	local config = child.lua([[
 		require('pi-bridge').setup({ log_level = 'error' })

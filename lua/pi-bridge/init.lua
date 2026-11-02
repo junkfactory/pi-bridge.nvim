@@ -37,6 +37,11 @@ local defaults = {
 	-- pass through (see pi-bridge.ext's `PI_BRIDGE_UI_PROMPT_MIRROR=0`
 	-- kill switch for the other direction).
 	ui_prompt_mirror = true,
+	-- Completion plugins (blink.cmp / nvim-cmp) auto-trigger while typing
+	-- in the input box. Default false disables them there — typing stays
+	-- quiet and manual <Tab> completion is the only path. Set true to let
+	-- them trigger normally in the box.
+	input_completion = false,
 }
 
 local function validate_config(cfg)
@@ -77,6 +82,9 @@ local function validate_config(cfg)
 	end
 	if cfg.notify ~= nil and type(cfg.notify) ~= "boolean" then
 		return "notify must be a boolean"
+	end
+	if cfg.input_completion ~= nil and type(cfg.input_completion) ~= "boolean" then
+		return "input_completion must be a boolean"
 	end
 	return nil
 end
@@ -329,7 +337,7 @@ function M.prompt(opts)
 	if opts.text then
 		send(opts.text)
 	else
-		require("pi-bridge.input").open({ on_submit = send })
+		require("pi-bridge.input").open({ on_submit = send, completion = config.input_completion })
 	end
 end
 
