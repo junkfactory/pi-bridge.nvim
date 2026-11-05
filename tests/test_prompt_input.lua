@@ -155,6 +155,19 @@ T["prompt_input"]["<C-c> cancels without submitting"] = function()
 	settle()
 	expect.equality(child.lua("return input.is_open()"), false)
 	expect.equality(#sent(), 0)
+	-- Same insert-mode leak as submit: close must restore normal mode.
+	expect.equality(child.lua("return vim.fn.mode()"), "n")
+end
+
+T["prompt_input"]["submit leaves the previous window in normal mode"] = function()
+	open()
+	child.type_keys("hello", "<CR>")
+	wait_for("#_G.in_sent == 1")
+	settle()
+	expect.equality(child.lua("return input.is_open()"), false)
+	-- The box closes out of Insert mode: the refocused caller window must
+	-- not inherit it, or typed keys land in the user's buffer.
+	expect.equality(child.lua("return vim.fn.mode()"), "n")
 end
 
 T["prompt_input"]["submit trims trailing whitespace"] = function()

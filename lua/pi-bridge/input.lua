@@ -243,6 +243,10 @@ function M.close(reason)
 	if st.prev_win and vim.api.nvim_win_is_valid(st.prev_win) then
 		pcall(vim.api.nvim_set_current_win, st.prev_win)
 	end
+	-- The box opens with startinsert and may close while Insert mode is
+	-- still active (submit, <C-c>): the refocused previous window would
+	-- inherit it and typed keys would land in the caller's buffer.
+	pcall(vim.cmd.stopinsert)
 	pcall(vim.api.nvim_del_augroup_by_name, AUGROUP)
 	if state == st then state = nil end
 	log.debug("input: closed prompt (" .. tostring(reason or "no reason") .. ")")
