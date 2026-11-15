@@ -65,19 +65,25 @@ local enabled = true
 local original_select = nil -- captured at M.setup()
 local wrapper_installed = false
 
--- Request state: only one request in flight at a time. pi serializes.
-local current_id = nil
-local current_send = nil
+-- Per-request state, keyed by approval_request id. Each entry owns the
+-- send fn for its own request and (plugin-picker path) its dismiss
+-- handle, so a late callback or a stale resolve() for a settled id can
+-- never read or clobber another request's state. Fields:
+--   send     fn(msg) — the socket sender captured at show() time
+--   open     true once the picker for this id actually opened
+--   dismiss  fn — best-effort picker close (wrapper path only)
+local requests = {}
+
+-- Id of the request whose picker is opening right now. Set only for the
+-- duration of the synchronous vim.ui.select call run_plugin makes, so the
+-- installed wrapper cannot pick up another request's id; nil means "not
+-- an approval call" and falls through to native behavior.
+local opening_id = nil
 
 -- UI-safe bodies of resolve()/on_remote_disconnect() — forward-declared
 -- because the public wrappers schedule them (see schedule_ui below).
 local resolve_sync
 local on_remote_disconnect_sync
-
--- Per-request dismiss handles for the wrapper (plugin picker) path.
--- Keyed by approval_request id so resolve() / on_remote_disconnect()
--- can target the right one.
-local pending = {}
 
 -- Guard flag: set when the picker is dismissed remotely, so the
 -- plugin's eventual on_choice(nil) (from its own cancel path) does
@@ -123,11 +129,12 @@ function M.is_stock_picker()
 	return source:match("vim[/\\]ui%.lua$") ~= nil
 end
 
--- Send a response back to pi. pcall because the socket may have died
--- while the user was deciding.
-local function send_response(id, decision)
-	if type(current_send) ~= "function" then return end
-	local ok, err = pcall(current_send, {
+-- Send a response to pi for ONE request, through that request's own
+-- sender. pcall because the socket may have died while the user was
+-- deciding.
+local function respond(send, id, decision)
+	if type(send) ~= "function" then return end
+	local ok, err = pcall(send, {
 		type = "approval_response",
 		id = id,
 		decision = decision,
@@ -137,17 +144,23 @@ local function send_response(id, decision)
 	end
 end
 
-local function clear_current()
-	current_id = nil
-	current_send = nil
+-- Id of the request whose picker is currently open, if any.
+local function open_id()
+	for id, entry in pairs(requests) do
+		if entry.open then return id end
+	end
 end
 
 -- Stock picker path: render via fallback-select.
-local function run_stock(req)
+local function run_stock(req, send)
 	fallback.show(req, function(msg)
-		-- Forward through the original send captured at show() time.
-		if type(current_send) ~= "function" then return end
-		local ok, err = pcall(current_send, msg)
+		-- The float answered (or dismissed-as-reject): the request is
+		-- settled, so drop its state locally. Do not rely on the
+		-- `approval_resolved` echo — a user answer may never get one.
+		requests[req.id] = nil
+		-- Forward through the sender captured at show() time.
+		if type(send) ~= "function" then return end
+		local ok, err = pcall(send, msg)
 		if not ok then
 			log.error("approval: fallback send failed: " .. tostring(err))
 		end
@@ -168,9 +181,11 @@ local function install_wrapper()
 	local call_through = vim.ui.select
 
 	local function wrapper(items, opts, on_choice)
-		local id = current_id
-		if type(id) ~= "string" then
-			-- Defensive: fall back to native behavior.
+		local id = opening_id
+		local entry = type(id) == "string" and requests[id] or nil
+		if not entry then
+			-- Not an approval call (or the request settled before the
+			-- picker opened): fall back to native behavior.
 			call_through(items, opts, on_choice)
 			return
 		end
@@ -178,11 +193,12 @@ local function install_wrapper()
 		local wrapped_on_choice = function(choice)
 			if dismissed_remote[id] then
 				dismissed_remote[id] = nil
-				pending[id] = nil
+				requests[id] = nil
 				log.info("approval: picker dismissed remotely for " .. tostring(id))
 				return
 			end
-			pending[id] = nil
+			-- The request entry is cleared by run_plugin's on_choice below
+			-- (it needs it to tell a live answer from a stale one).
 			on_choice(choice)
 		end
 
@@ -191,31 +207,29 @@ local function install_wrapper()
 		-- dismiss handle is installed BEFORE the call so a synchronous
 		-- on_choice(nil) can't race it, and `ret` is filled in after.
 		local ret
-		pending[id] = {
-			dismiss = function()
-				if dismissed_remote[id] then return end
-				dismissed_remote[id] = true
-				log.info("approval: remote dismiss for " .. tostring(id))
-				-- Precise handle: the instance the picker returned us.
-				if type(ret) == "table" and type(ret.close) == "function" then
-					pcall(ret.close, ret)
-					return
-				end
-				-- Best-effort fallbacks for pickers that return nothing.
-				pcall(function()
-					local m = require("dressing.select.builtin")
-					if m and m.cancel then m.cancel() end
-				end)
-				pcall(function()
-					local s = require("snacks")
-					if s and s.picker and s.picker.get then
-						for _, p in ipairs(s.picker.get({ source = "select" })) do
-							if p and p.close then p:close() end
-						end
+		entry.dismiss = function()
+			if dismissed_remote[id] then return end
+			dismissed_remote[id] = true
+			log.info("approval: remote dismiss for " .. tostring(id))
+			-- Precise handle: the instance the picker returned us.
+			if type(ret) == "table" and type(ret.close) == "function" then
+				pcall(ret.close, ret)
+				return
+			end
+			-- Best-effort fallbacks for pickers that return nothing.
+			pcall(function()
+				local m = require("dressing.select.builtin")
+				if m and m.cancel then m.cancel() end
+			end)
+			pcall(function()
+				local s = require("snacks")
+				if s and s.picker and s.picker.get then
+					for _, p in ipairs(s.picker.get({ source = "select" })) do
+						if p and p.close then p:close() end
 					end
-				end)
-			end,
-		}
+				end
+			end)
+		end
 
 		ret = call_through(items, opts, wrapped_on_choice)
 	end
@@ -225,7 +239,7 @@ local function install_wrapper()
 	log.debug("approval: installed vim.ui.select wrapper")
 end
 
-local function run_plugin(req)
+local function run_plugin(req, send)
 	install_wrapper()
 
 	-- Build the prompt (same shape as the legacy path).
@@ -258,79 +272,84 @@ local function run_plugin(req)
 		{ label = "n — reject this edit", decision = "no" },
 	}
 
-	vim.ui.select(CHOICES, {
+	opening_id = req.id
+	local ok_call, err_call = pcall(vim.ui.select, CHOICES, {
 		prompt = prompt,
 		format_item = function(item)
 			return item.label
 		end,
 	}, function(choice)
-		if current_id ~= req.id then
-			-- Stale callback (request already cleared by resolve /
-			-- remote disconnect). Drop.
+		if requests[req.id] == nil then
+			-- Stale callback: this request already settled (answered,
+			-- resolved remotely, or pi disconnected). Never answer a
+			-- settled id — and never silently: a real choice arriving
+			-- here means a picker called back twice.
+			if choice ~= nil then
+				log.warn("approval: dropping stale choice for " .. tostring(req.id))
+			end
 			return
 		end
-		-- Capture the send fn BEFORE clear_current() nils it —
-		-- send_response reads the module-level current_send.
-		local send = current_send
-		local function respond(dec)
-			if type(send) ~= "function" then return end
-			local ok, err = pcall(send, {
-				type = "approval_response",
-				id = req.id,
-				decision = dec,
-			})
-			if not ok then
-				log.error("approval: failed to send response: " .. tostring(err))
-			end
-		end
-		clear_current()
+		-- Only this request's state is cleared; other ids are untouched.
+		requests[req.id] = nil
 		if choice == nil then
 			log.info("approval: picker dismissed for " .. tostring(req.id))
-			respond("no")
+			respond(send, req.id, "no")
 			return
 		end
 		log.info("approval: " .. req.id .. " -> " .. choice.decision)
-		respond(choice.decision)
+		respond(send, req.id, choice.decision)
 	end)
+	opening_id = nil
+	if not ok_call then
+		-- Re-raise: same propagation as before, but opening_id is reset
+		-- first so a failed picker cannot mislabel a later select call.
+		error(err_call)
+	end
 end
 
 -- Full show body. Runs in a UI-safe context (normal or scheduled via
 -- `schedule_ui`) — picker APIs and the buffer checks would raise
 -- E5560 in a fast event context.
 local function run_show(req)
-	if current_id ~= nil then
-		-- Defensive: pi should serialize. If two arrive, prefer the
-		-- open picker and let pi's queue re-deliver later.
-		log.warn(
-			"approval: request "
-				.. tostring(req.id)
-				.. " ignored; picker already open for "
-				.. tostring(current_id)
-		)
+	local entry = requests[req.id]
+	if not entry then
+		-- Settled while the UI callback was queued (fast-event path).
+		log.debug("approval: request " .. tostring(req.id) .. " settled before show")
 		return
 	end
 
-	local id = req.id
-	if type(id) ~= "string" or id == "" then
-		log.warn("approval: missing id, ignoring request")
+	local open = open_id()
+	if open and open ~= req.id then
+		-- A request arriving while another id's picker is open means that
+		-- picker's request already settled (pi broadcasts
+		-- `approval_resolved` before the next request; the echo may be
+		-- dropped). Replace the stale picker: dismiss it silently — no
+		-- response for the stale id — and show the new request.
+		log.warn("approval: replacing stale picker for " .. tostring(open))
+		resolve_sync(open)
+	elseif open then
+		-- Same id shown twice: the open picker still owns it. Keep the
+		-- state (clearing it would drop the live picker's answer).
+		log.warn("approval: duplicate show for " .. tostring(req.id) .. " ignored")
 		return
 	end
 
-	current_id = id
+	entry.open = true
+	local send = entry.send
 
 	-- Ack immediately so older pi (which shows its fallback overlay
 	-- without ack) does not duplicate the prompt.
-	if type(current_send) == "function" then
-		local ok, err = pcall(current_send, { type = "approval_ack", id = id })
+	if type(send) == "function" then
+		local ok, err = pcall(send, { type = "approval_ack", id = req.id })
 		if not ok then
 			log.error("approval: failed to send ack: " .. tostring(err))
 		end
 	end
 
 	if M.is_stock_picker() then
-		run_stock(req)
+		run_stock(req, send)
 	else
-		run_plugin(req)
+		run_plugin(req, send)
 	end
 end
 
@@ -347,9 +366,24 @@ function M.show(req, send)
 		return
 	end
 
-	-- Capture the send fn for this request. Cleared when the request
-	-- settles (answer, resolve, or remote disconnect).
-	current_send = send
+	local id = req.id
+	if type(id) ~= "string" or id == "" then
+		log.warn("approval: missing id, ignoring request")
+		return
+	end
+
+	-- The request owns its send fn: cleared when THIS request settles
+	-- (answer, resolve, or remote disconnect), never shared.
+	local existing = requests[id]
+	if existing and existing.open then
+		-- Same id re-shown while its picker is still open: keep the live
+		-- entry (send/dismiss/open) so run_show's duplicate branch can
+		-- drop the repeat. Replacing it would open a second picker and
+		-- lose the live one's answer path.
+		log.debug("approval: duplicate show for " .. id .. " (picker open), keeping state")
+	else
+		requests[id] = { send = send }
+	end
 
 	-- The socket callback runs in a libuv fast event; nvim_* APIs raise
 	-- E5560 there. Defer to the main loop when needed (see schedule_ui).
@@ -370,18 +404,18 @@ function M.resolve(id)
 end
 
 function resolve_sync(id)
-	local handle = pending[id]
-	if handle and type(handle.dismiss) == "function" then
+	-- Only THIS request's state is touched: a resolve for an already
+	-- settled id finds nothing and leaves newer requests alone.
+	local entry = requests[id]
+	requests[id] = nil
+	if entry and type(entry.dismiss) == "function" then
 		-- Wrapper path: trigger the plugin's cancel. The wrapper
 		-- intercepts the eventual on_choice(nil) via dismissed_remote.
-		handle.dismiss()
+		entry.dismiss()
 	elseif fallback.is_open() and fallback.get_pending_id() == id then
 		-- Fallback float path: silent close (no echo, no response).
 		fallback.close()
 		log.info("approval: fallback closed for resolved " .. tostring(id))
-	end
-	if current_id == id then
-		clear_current()
 	end
 end
 
@@ -405,17 +439,18 @@ function on_remote_disconnect_sync()
 	if fallback.is_open() then
 		fallback.close()
 	end
-	-- Walk all pending wrappers; each gets a dismiss (no echo — the
-	-- single "pi disconnected" notify below covers the user-facing
-	-- message for both paths).
-	for id, handle in pairs(pending) do
-		if type(handle.dismiss) == "function" then
-			handle.dismiss()
+	-- Walk all live requests; each gets a dismiss (no echo — the single
+	-- "pi disconnected" notify below covers the user-facing message for
+	-- both paths).
+	local had_request = false
+	for id, entry in pairs(requests) do
+		had_request = true
+		if type(entry.dismiss) == "function" then
+			entry.dismiss()
 		end
-		pending[id] = nil
+		requests[id] = nil
 	end
-	if current_id ~= nil then
-		clear_current()
+	if had_request then
 		vim.schedule(function()
 			vim.notify("pi-bridge: pi disconnected", vim.log.levels.WARN)
 		end)
@@ -428,10 +463,9 @@ end
 -- Test-only: clear module state. Not part of the public API.
 function M._reset()
 	enabled = true
-	current_id = nil
-	current_send = nil
-	pending = {}
+	requests = {}
 	dismissed_remote = {}
+	opening_id = nil
 	-- Restore vim.ui.select to the captured original (test may have
 	-- installed a wrapper that must not leak into the next case).
 	if wrapper_installed and original_select then

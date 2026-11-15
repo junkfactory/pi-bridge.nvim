@@ -147,17 +147,23 @@ T["approval"]["picker records buffer-modified warning in the prompt"] = function
 	)
 end
 
-T["approval"]["second request while picker is open is ignored"] = function()
+T["approval"]["a request arriving while a picker is open replaces the stale picker"] = function()
 	child.lua(MOCK_SELECT)
 	child.lua("approval.setup({ edit_approval_prompt = true })")
-	-- First request opens the picker (mock never calls on_choice).
+	-- A's picker stays open (the mock never calls on_choice).
 	child.lua(make_request("req-1"))
-	-- Second request while the picker is still open must not ack again.
+	-- B must not be ignored forever: A's request necessarily settled (pi
+	-- broadcasts approval_resolved before the next request), so A's
+	-- picker is dismissed silently and B gets its own picker.
 	child.lua(make_request("req-2"))
 
 	local sent = messages()
-	expect.equality(#sent, 1)
+	expect.equality(#sent, 2)
+	expect.equality(sent[1].type, "approval_ack")
 	expect.equality(sent[1].id, "req-1")
+	expect.equality(sent[2].type, "approval_ack")
+	expect.equality(sent[2].id, "req-2")
+	expect.equality(child.lua("return #_G._select_calls"), 2)
 end
 
 T["approval"]["missing id is dropped without acking"] = function()
@@ -494,6 +500,239 @@ T["approval"]["on_remote_disconnect with no picker open is a no-op"] = function(
 	)
 	expect.equality(child.lua("return select(1, pcall(approval.on_remote_disconnect))"), true)
 	expect.equality(child.lua("return #_G.approval_sent"), 0)
+end
+
+-- ---------------------------------------------------------------------------
+-- Per-request state: no cross-request clobbering
+-- ---------------------------------------------------------------------------
+
+-- Plugin-style picker mock that keeps every on_choice callback, so a
+-- test can answer an *earlier* request after a later one was shown.
+local MOCK_ASYNC_PICKER = [[
+	_G._on_choices = {}
+	vim.ui.select = function(items, opts, on_choice)
+		_G._on_choices[#_G._on_choices + 1] = on_choice
+		return { close = function() _G._closed[#_G._on_choices] = (_G._closed[#_G._on_choices] or 0) + 1 end }
+	end
+]]
+
+T["approval"]["stale resolve for A does not swallow a later request B's answer"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = {}
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'stale-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	-- approval_resolved(A) lands in the same fast event that brings B: the
+	-- two scheduled callbacks run resolve(A) first, then show B. The old
+	-- single-slot state had resolve(A) wipe B's send fn.
+	child.lua([[
+		local timer = vim.uv.new_timer()
+		timer:start(0, 0, function()
+			approval.resolve('stale-a')
+			approval.show({ id = 'stale-b', tool = 'edit', path = '/tmp/b.lua' }, send_b)
+		end)
+	]])
+	child.lua("vim.wait(2000, function() return #_G._on_choices >= 2 end)")
+	expect.equality(child.lua("return #_G._on_choices"), 2)
+	-- Answer for B reaches B's sender, with B's id.
+	child.lua("_G._on_choices[2]({ label = 'a', decision = 'all' })")
+	local sent_a = child.lua("return _G.sent_a")
+	local sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_a, 1) -- ack only; A was resolved, nothing sent
+	expect.equality(#sent_b, 2) -- ack + response
+	expect.equality(sent_b[1].type, "approval_ack")
+	expect.equality(sent_b[2].type, "approval_response")
+	expect.equality(sent_b[2].id, "stale-b")
+	expect.equality(sent_b[2].decision, "all")
+end
+
+T["approval"]["choice for a settled request is dropped with a warning"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._warns = {}
+		require('pi-bridge.log').warn = function(msg) table.insert(_G._warns, msg) end
+		_G._closed = {}
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.approval_sent = {}
+		_G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end
+	]])
+	child.lua(make_request("settled-1"))
+	child.lua("_G._on_choices[1]({ label = 'y', decision = 'yes' })")
+	expect.equality(#messages(), 2) -- ack + response
+	-- A picker calling back again must not answer the settled id.
+	child.lua("_G._on_choices[1]({ label = 'n', decision = 'no' })")
+	expect.equality(#messages(), 2)
+	local warns = child.lua("return _G._warns")
+	expect.equality(#warns, 1)
+	expect.equality(warns[1]:find("stale choice", 1, true) ~= nil, true)
+end
+
+T["approval"]["resolve dismisses only its own request's picker"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = {}
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'own-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	child.lua("approval.resolve('own-a')")
+	expect.equality(child.lua("return _G._closed[1]"), 1)
+	-- B opens after A settled and keeps its own handle/sender.
+	child.lua([[approval.show({ id = 'own-b', tool = 'edit', path = '/tmp/b.lua' }, send_b)]])
+	expect.equality(child.lua("return _G._closed[2] == nil"), true)
+	-- A repeated resolve for the settled A must not touch B's picker...
+	child.lua("approval.resolve('own-a')")
+	expect.equality(child.lua("return _G._closed[2] == nil"), true)
+	-- ...nor B's answer.
+	child.lua("_G._on_choices[2]({ label = 'a', decision = 'all' })")
+	local sent_a = child.lua("return _G.sent_a")
+	local sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_a, 1) -- ack only; A was resolved, nothing sent
+	expect.equality(#sent_b, 2) -- ack + response
+	expect.equality(sent_b[2].id, "own-b")
+	expect.equality(sent_b[2].decision, "all")
+end
+
+T["approval"]["stale picker is replaced: closed, unresponded, and its late answer dropped"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = {}
+		_G._warns = {}
+		require('pi-bridge.log').warn = function(msg) table.insert(_G._warns, msg) end
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'rep-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	-- B arrives while A's picker is still open (A's resolve never reached us).
+	child.lua([[approval.show({ id = 'rep-b', tool = 'edit', path = '/tmp/b.lua' }, send_b)]])
+	expect.equality(child.lua("return _G._closed[1]"), 1) -- A's picker dismissed
+	expect.equality(child.lua("return #_G._on_choices"), 2) -- B opened its own
+	local sent_a = child.lua("return _G.sent_a")
+	local sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_a, 1) -- ack only: never a response for the stale id
+	expect.equality(sent_b[1].type, "approval_ack")
+	expect.equality(sent_b[1].id, "rep-b")
+	local warns = child.lua("return _G._warns")
+	local saw_replace = false
+	for _, w in ipairs(warns) do
+		if w:find("replacing stale picker", 1, true) then saw_replace = true end
+	end
+	expect.equality(saw_replace, true)
+	-- The answer to B reaches B's sender, with B's id.
+	child.lua("_G._on_choices[2]({ label = 'a', decision = 'all' })")
+	sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_b, 2)
+	expect.equality(sent_b[2].type, "approval_response")
+	expect.equality(sent_b[2].id, "rep-b")
+	expect.equality(sent_b[2].decision, "all")
+	-- A's eventual dismiss callback is intercepted: nothing sent for A.
+	child.lua("_G._on_choices[1](nil)")
+	expect.equality(child.lua("return #_G.sent_a"), 1)
+end
+
+T["approval"]["same id shown twice keeps the one open picker and its state"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = {}
+		_G._warns = {}
+		require('pi-bridge.log').warn = function(msg) table.insert(_G._warns, msg) end
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'dup-1', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	-- pi re-broadcasts the same id while the picker is still open.
+	child.lua([[approval.show({ id = 'dup-1', tool = 'edit', path = '/tmp/a.lua' }, send_b)]])
+	expect.equality(child.lua("return #_G._on_choices"), 1) -- no second picker
+	expect.equality(child.lua("return _G._closed[1] == nil"), true) -- not dismissed
+	expect.equality(child.lua("return #_G.sent_a"), 1) -- single ack
+	expect.equality(child.lua("return #_G.sent_b"), 0) -- the repeat acked nothing
+	-- The live picker still owns the request: its answer is sent once,
+	-- through the sender captured at the FIRST show.
+	child.lua("_G._on_choices[1]({ label = 'y', decision = 'yes' })")
+	local sent_a = child.lua("return _G.sent_a")
+	expect.equality(#sent_a, 2)
+	expect.equality(sent_a[2].type, "approval_response")
+	expect.equality(sent_a[2].id, "dup-1")
+	expect.equality(sent_a[2].decision, "yes")
+	expect.equality(child.lua("return #_G.sent_b"), 0)
+	local warns = child.lua("return _G._warns")
+	local saw_dup = false
+	for _, w in ipairs(warns) do
+		if w:find("duplicate show", 1, true) then saw_dup = true end
+	end
+	expect.equality(saw_dup, true)
+end
+
+T["approval"]["a different id after a duplicate show still replaces the stale picker"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G._closed = {}
+	]] .. MOCK_ASYNC_PICKER .. [[
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'dup-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	child.lua([[approval.show({ id = 'dup-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	-- B is a DIFFERENT id: the B2 replacement path must still run.
+	child.lua([[approval.show({ id = 'dup-b', tool = 'edit', path = '/tmp/b.lua' }, send_b)]])
+	expect.equality(child.lua("return #_G._on_choices"), 2)
+	expect.equality(child.lua("return _G._closed[1]"), 1) -- A's picker dismissed
+	expect.equality(child.lua("return #_G.sent_a"), 1) -- ack only, no response
+	local sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_b, 1)
+	expect.equality(sent_b[1].type, "approval_ack")
+	expect.equality(sent_b[1].id, "dup-b")
+end
+
+T["approval"]["stale stock float is replaced by the next request"] = function()
+	child.lua([[
+		approval.setup({ edit_approval_prompt = true })
+		_G.sent_a, _G.sent_b = {}, {}
+		_G.send_a = function(msg) table.insert(_G.sent_a, msg) end
+		_G.send_b = function(msg) table.insert(_G.sent_b, msg) end
+	]])
+	child.lua([[approval.show({ id = 'fs-rep-a', tool = 'edit', path = '/tmp/a.lua' }, send_a)]])
+	local fb = "require('pi-bridge.fallback-select')"
+	expect.equality(child.lua("return " .. fb .. ".is_open()"), true)
+	child.lua([[approval.show({ id = 'fs-rep-b', tool = 'edit', path = '/tmp/b.lua' }, send_b)]])
+	expect.equality(child.lua("return " .. fb .. ".is_open()"), true)
+	expect.equality(child.lua("return " .. fb .. ".get_pending_id()"), "fs-rep-b")
+	expect.equality(child.lua("return #_G.sent_a"), 1) -- ack only
+	-- The float now answers for B.
+	child.lua("vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('y', true, false, true), 'x', false)")
+	expect.equality(child.lua("return #_G.sent_a"), 1)
+	local sent_b = child.lua("return _G.sent_b")
+	expect.equality(#sent_b, 2) -- ack + response
+	expect.equality(sent_b[2].id, "fs-rep-b")
+	expect.equality(sent_b[2].decision, "yes")
+end
+
+T["approval"]["stock path clears its own state after the user answers"] = function()
+	child.lua("approval.setup({ edit_approval_prompt = true }) _G.approval_sent = {} _G.fake_send = function(msg) table.insert(_G.approval_sent, msg) end")
+	child.lua(make_request("fs-clear-1"))
+	child.lua("vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('a', true, false, true), 'x', false)")
+	local sent = messages()
+	expect.equality(#sent, 2) -- ack + response(all)
+	expect.equality(sent[2].decision, "all")
+	-- A follow-up request must open: the settled one left no slot behind
+	-- (the old code kept a stale current_id and silently ignored it).
+	child.lua(make_request("fs-clear-2"))
+	expect.equality(child.lua("return require('pi-bridge.fallback-select').is_open()"), true)
+	local sent2 = messages()
+	expect.equality(#sent2, 3)
+	expect.equality(sent2[3].type, "approval_ack")
+	expect.equality(sent2[3].id, "fs-clear-2")
 end
 
 return T

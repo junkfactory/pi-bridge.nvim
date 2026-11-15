@@ -341,6 +341,8 @@ When pi is about to apply its `edit` or `write` tool for a request that originat
 
 Edits you type directly into pi never prompt — only Neovim-sent requests are gated.
 
+If a new `approval_request` arrives while a picker is still open, that request has already settled (pi broadcasts `approval_resolved` before sending the next one, though the echo can be dropped). The stale picker is then dismissed silently and the new request takes over — no answer is ever sent for the stale id.
+
 The picker follows your configured `vim.ui.select` (dressing, snacks, fzf-lua, ...). With the **stock** picker — which blocks in `inputlist()` and cannot be closed programmatically — pi-bridge shows its own minimal floating prompt (same choices, same keys) so dismissal still works.
 
 | Choice  | Decision | Effect                                              |
